@@ -1,0 +1,457 @@
+use crate::atlas::allocator::GlyphAtlas;
+use crate::atlas::cache::GlyphCache;
+use crate::font::registry::FontRegistry;
+use crate::layout::flow::FlowLayout;
+use crate::types::{BlockVisualInfo, CursorDisplay, FontFaceId, HitTestResult, RenderFrame};
+
+/// How the content (layout) width is determined.
+///
+/// Controls whether text reflows when the viewport resizes (web/editor style)
+/// or wraps at a fixed width (page/WYSIWYG style).
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ContentWidthMode {
+    /// Content width equals viewport width. Text reflows on window resize.
+    /// This is the default.typical for editors and web-style layout.
+    #[default]
+    Auto,
+    /// Content width is fixed, independent of viewport.
+    /// For page-like layout (WYSIWYG), print preview, or side panels.
+    /// If the content is wider than the viewport, horizontal scrolling is needed.
+    /// If narrower, the content is centered or left-aligned within the viewport.
+    Fixed(f32),
+}
+
+/// The main entry point for text typesetting.
+///
+/// Owns the font registry, glyph atlas, layout cache, and render state.
+/// The typical usage pattern is:
+///
+/// 1. Create with [`Typesetter::new`]
+/// 2. Register fonts with [`register_font`](Typesetter::register_font)
+/// 3. Set default font with [`set_default_font`](Typesetter::set_default_font)
+/// 4. Set viewport with [`set_viewport`](Typesetter::set_viewport)
+/// 5. Lay out content with [`layout_full`](Typesetter::layout_full) or [`layout_blocks`](Typesetter::layout_blocks)
+/// 6. Set cursor state with [`set_cursor`](Typesetter::set_cursor)
+/// 7. Render with [`render`](Typesetter::render) to get a [`RenderFrame`]
+/// 8. On edits, use [`relayout_block`](Typesetter::relayout_block) for incremental updates
+///
+/// # Thread safety
+///
+/// `Typesetter` is `!Send + !Sync` because its internal fontdb, atlas allocator,
+/// and swash scale context are not thread-safe. It lives on the adapter's render
+/// thread alongside the framework's drawing calls.
+pub struct Typesetter {
+    font_registry: FontRegistry,
+    atlas: GlyphAtlas,
+    glyph_cache: GlyphCache,
+    flow_layout: FlowLayout,
+    scale_context: swash::scale::ScaleContext,
+    render_frame: RenderFrame,
+    scroll_offset: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    content_width_mode: ContentWidthMode,
+    selection_color: [f32; 4],
+    cursor_color: [f32; 4],
+    cursors: Vec<CursorDisplay>,
+}
+
+impl Typesetter {
+    /// Create a new typesetter with no fonts loaded.
+    ///
+    /// Call [`register_font`](Self::register_font) and [`set_default_font`](Self::set_default_font)
+    /// before laying out any content.
+    pub fn new() -> Self {
+        Self {
+            font_registry: FontRegistry::new(),
+            atlas: GlyphAtlas::new(),
+            glyph_cache: GlyphCache::new(),
+            flow_layout: FlowLayout::new(),
+            scale_context: swash::scale::ScaleContext::new(),
+            render_frame: RenderFrame::new(),
+            scroll_offset: 0.0,
+            viewport_width: 0.0,
+            viewport_height: 0.0,
+            content_width_mode: ContentWidthMode::Auto,
+            selection_color: [0.26, 0.52, 0.96, 0.3],
+            cursor_color: [0.0, 0.0, 0.0, 1.0],
+            cursors: Vec::new(),
+        }
+    }
+
+    // ── Font registration ───────────────────────────────────────
+
+    /// Register a font face from raw TTF/OTF/WOFF bytes.
+    ///
+    /// Parses the font's name table to extract family, weight, and style,
+    /// then indexes it for CSS-spec font matching via [`fontdb`].
+    /// Returns the first face ID (font collections like `.ttc` may contain multiple faces).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the font data contains no parseable faces.
+    pub fn register_font(&mut self, data: &[u8]) -> FontFaceId {
+        let ids = self.font_registry.register_font(data);
+        ids.into_iter()
+            .next()
+            .expect("font data contained no faces")
+    }
+
+    /// Register a font with explicit metadata, overriding the font's name table.
+    ///
+    /// Use when the font's internal metadata is unreliable or when aliasing
+    /// a font to a different family name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the font data contains no parseable faces.
+    pub fn register_font_as(
+        &mut self,
+        data: &[u8],
+        family: &str,
+        weight: u16,
+        italic: bool,
+    ) -> FontFaceId {
+        let ids = self
+            .font_registry
+            .register_font_as(data, family, weight, italic);
+        ids.into_iter()
+            .next()
+            .expect("font data contained no faces")
+    }
+
+    /// Set which font face to use as the document default.
+    ///
+    /// This is the fallback font when a fragment's `TextFormat` doesn't specify
+    /// a family or the specified family isn't found.
+    pub fn set_default_font(&mut self, face: FontFaceId, size_px: f32) {
+        self.font_registry.set_default_font(face, size_px);
+    }
+
+    /// Map a generic family name to a registered font family.
+    ///
+    /// Common mappings: `"serif"` → `"Noto Serif"`, `"monospace"` → `"Fira Code"`.
+    /// When text-document specifies `font_family: "monospace"`, the typesetter
+    /// resolves it through this mapping before querying fontdb.
+    pub fn set_generic_family(&mut self, generic: &str, family: &str) {
+        self.font_registry.set_generic_family(generic, family);
+    }
+
+    /// Access the font registry for advanced queries (glyph coverage, fallback, etc.).
+    pub fn font_registry(&self) -> &FontRegistry {
+        &self.font_registry
+    }
+
+    // ── Viewport & content width ───────────────────────────────
+
+    /// Set the viewport dimensions (visible area in pixels).
+    ///
+    /// The viewport controls:
+    /// - **Culling**: only blocks within the viewport are rendered.
+    /// - **Selection highlight**: multi-line selections extend to viewport width.
+    /// - **Layout width** (in [`ContentWidthMode::Auto`]): text wraps at viewport width.
+    ///
+    /// Call this when the window or container resizes.
+    pub fn set_viewport(&mut self, width: f32, height: f32) {
+        self.viewport_width = width;
+        self.viewport_height = height;
+        self.flow_layout.viewport_width = width;
+        self.flow_layout.viewport_height = height;
+    }
+
+    /// Set a fixed content width, independent of viewport.
+    ///
+    /// Text wraps at this width regardless of how wide the viewport is.
+    /// Use for page-like (WYSIWYG) layout or documents with explicit width.
+    /// Pass `f32::INFINITY` for no-wrap mode.
+    pub fn set_content_width(&mut self, width: f32) {
+        self.content_width_mode = ContentWidthMode::Fixed(width);
+    }
+
+    /// Set content width to follow viewport width (default).
+    ///
+    /// Text reflows when the viewport is resized. This is the standard
+    /// behavior for editors and web-style layout.
+    pub fn set_content_width_auto(&mut self) {
+        self.content_width_mode = ContentWidthMode::Auto;
+    }
+
+    /// The effective width used for text layout (line wrapping, table columns, etc.).
+    ///
+    /// In [`ContentWidthMode::Auto`], equals viewport width.
+    /// In [`ContentWidthMode::Fixed`], equals the set value.
+    pub fn layout_width(&self) -> f32 {
+        match self.content_width_mode {
+            ContentWidthMode::Auto => self.viewport_width,
+            ContentWidthMode::Fixed(w) => w,
+        }
+    }
+
+    /// Set the vertical scroll offset in pixels from the top of the document.
+    ///
+    /// Affects which blocks are visible (culling) and the screen-space
+    /// y coordinates in the rendered [`RenderFrame`].
+    pub fn set_scroll_offset(&mut self, offset: f32) {
+        self.scroll_offset = offset;
+    }
+
+    /// Total content height after layout, in pixels.
+    ///
+    /// Use for scrollbar range: `scrollbar.max = content_height - viewport_height`.
+    pub fn content_height(&self) -> f32 {
+        self.flow_layout.content_height
+    }
+
+    // ── Layout ──────────────────────────────────────────────────
+
+    /// Full layout from a text-document `FlowSnapshot`.
+    ///
+    /// Converts all snapshot elements (blocks, tables, frames) to internal
+    /// layout params and lays out the entire document flow. Call this on
+    /// `DocumentReset` events or initial document load.
+    ///
+    /// For incremental updates after small edits, prefer [`relayout_block`](Self::relayout_block).
+    #[cfg(feature = "text-document")]
+    pub fn layout_full(&mut self, flow: &text_document::FlowSnapshot) {
+        use crate::bridge::convert_flow;
+
+        let converted = convert_flow(flow);
+
+        // Merge all elements by flow index and process in order
+        let mut all_items: Vec<(usize, FlowItemKind)> = Vec::new();
+        for (idx, params) in converted.blocks {
+            all_items.push((idx, FlowItemKind::Block(params)));
+        }
+        for (idx, params) in converted.tables {
+            all_items.push((idx, FlowItemKind::Table(params)));
+        }
+        for (idx, params) in converted.frames {
+            all_items.push((idx, FlowItemKind::Frame(params)));
+        }
+        all_items.sort_by_key(|(idx, _)| *idx);
+
+        let lw = self.layout_width();
+        self.flow_layout.clear();
+        self.flow_layout.viewport_width = self.viewport_width;
+        self.flow_layout.viewport_height = self.viewport_height;
+
+        for (_idx, kind) in all_items {
+            match kind {
+                FlowItemKind::Block(params) => {
+                    self.flow_layout.add_block(&self.font_registry, &params, lw);
+                }
+                FlowItemKind::Table(params) => {
+                    self.flow_layout.add_table(&self.font_registry, &params, lw);
+                }
+                FlowItemKind::Frame(params) => {
+                    self.flow_layout.add_frame(&self.font_registry, &params, lw);
+                }
+            }
+        }
+    }
+
+    /// Lay out a list of blocks from scratch (framework-agnostic API).
+    ///
+    /// Replaces all existing layout state with the given blocks.
+    /// This is the non-text-document equivalent of [`layout_full`](Self::layout_full).
+    /// the caller converts snapshot types to [`BlockLayoutParams`](crate::layout::block::BlockLayoutParams).
+    pub fn layout_blocks(&mut self, block_params: Vec<crate::layout::block::BlockLayoutParams>) {
+        self.flow_layout
+            .layout_blocks(&self.font_registry, block_params, self.layout_width());
+    }
+
+    /// Add a frame to the current flow layout.
+    ///
+    /// The frame is placed after all previously laid-out content.
+    /// Frame position (inline, float, absolute) is determined by
+    /// [`FrameLayoutParams::position`](crate::layout::frame::FrameLayoutParams).
+    pub fn add_frame(&mut self, params: &crate::layout::frame::FrameLayoutParams) {
+        self.flow_layout
+            .add_frame(&self.font_registry, params, self.layout_width());
+    }
+
+    /// Add a table to the current flow layout.
+    ///
+    /// The table is placed after all previously laid-out content.
+    pub fn add_table(&mut self, params: &crate::layout::table::TableLayoutParams) {
+        self.flow_layout
+            .add_table(&self.font_registry, params, self.layout_width());
+    }
+
+    /// Relayout a single block after its content or formatting changed.
+    ///
+    /// Re-shapes and re-wraps the block, then shifts subsequent blocks
+    /// if the height changed. Much cheaper than [`layout_full`](Self::layout_full)
+    /// for single-block edits (typing, formatting changes).
+    ///
+    /// If the block is inside a table cell (`BlockSnapshot::table_cell` is `Some`),
+    /// the table row height is re-measured and content below the table shifts.
+    pub fn relayout_block(&mut self, params: &crate::layout::block::BlockLayoutParams) {
+        self.flow_layout
+            .relayout_block(&self.font_registry, params, self.layout_width());
+    }
+
+    // ── Rendering ───────────────────────────────────────────────
+
+    /// Render the visible viewport and return everything needed to draw.
+    ///
+    /// Performs viewport culling (only processes blocks within the scroll window),
+    /// rasterizes any new glyphs into the atlas, and produces glyph quads,
+    /// image placeholders, and decoration rectangles.
+    ///
+    /// The returned reference borrows the `Typesetter`. The adapter should iterate
+    /// the frame for drawing, then drop the reference before calling any
+    /// layout/scroll methods on the next frame.
+    ///
+    /// On each call, stale glyphs (unused for ~120 frames) are evicted from the
+    /// atlas to reclaim space.
+    pub fn render(&mut self) -> &RenderFrame {
+        crate::render::frame::build_render_frame(
+            &self.flow_layout,
+            &self.font_registry,
+            &mut self.atlas,
+            &mut self.glyph_cache,
+            &mut self.scale_context,
+            self.scroll_offset,
+            self.viewport_height,
+            &self.cursors,
+            self.cursor_color,
+            self.selection_color,
+            &mut self.render_frame,
+        );
+        &self.render_frame
+    }
+
+    // ── Hit testing ─────────────────────────────────────────────
+
+    /// Map a screen-space point to a document position.
+    ///
+    /// Coordinates are relative to the widget's top-left corner.
+    /// The scroll offset is accounted for internally.
+    /// Returns `None` if the flow has no content.
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<HitTestResult> {
+        crate::render::hit_test::hit_test(&self.flow_layout, self.scroll_offset, x, y)
+    }
+
+    /// Get the screen-space caret rectangle at a document position.
+    ///
+    /// Returns `[x, y, width, height]` in screen pixels. Use this to report
+    /// the caret position to the platform IME system for composition window
+    /// placement. For drawing the caret, use the [`DecorationKind::Cursor`]
+    /// entry in [`RenderFrame::decorations`] instead.
+    pub fn caret_rect(&self, position: usize) -> [f32; 4] {
+        crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position)
+    }
+
+    // ── Cursor display ──────────────────────────────────────────
+
+    /// Update the cursor display state for a single cursor.
+    ///
+    /// The adapter reads `position` and `anchor` from text-document's
+    /// `TextCursor`, toggles `visible` on a blink timer, and passes
+    /// the result here. The typesetter includes cursor and selection
+    /// decorations in the next [`render`](Self::render) call.
+    pub fn set_cursor(&mut self, cursor: &CursorDisplay) {
+        self.cursors = vec![CursorDisplay {
+            position: cursor.position,
+            anchor: cursor.anchor,
+            visible: cursor.visible,
+        }];
+    }
+
+    /// Update multiple cursors (multi-cursor editing support).
+    ///
+    /// Each cursor independently generates a caret and optional selection highlight.
+    pub fn set_cursors(&mut self, cursors: &[CursorDisplay]) {
+        self.cursors = cursors
+            .iter()
+            .map(|c| CursorDisplay {
+                position: c.position,
+                anchor: c.anchor,
+                visible: c.visible,
+            })
+            .collect();
+    }
+
+    /// Set the selection highlight color (`[r, g, b, a]`, 0.0-1.0).
+    ///
+    /// Default: `[0.26, 0.52, 0.96, 0.3]` (translucent blue).
+    pub fn set_selection_color(&mut self, color: [f32; 4]) {
+        self.selection_color = color;
+    }
+
+    /// Set the cursor caret color (`[r, g, b, a]`, 0.0-1.0).
+    ///
+    /// Default: `[0.0, 0.0, 0.0, 1.0]` (black).
+    pub fn set_cursor_color(&mut self, color: [f32; 4]) {
+        self.cursor_color = color;
+    }
+
+    // ── Scrolling ───────────────────────────────────────────────
+
+    /// Get the visual position and height of a laid-out block.
+    ///
+    /// Returns `None` if the block ID is not in the current layout.
+    pub fn block_visual_info(&self, block_id: usize) -> Option<BlockVisualInfo> {
+        let block = self.flow_layout.blocks.get(&block_id)?;
+        Some(BlockVisualInfo {
+            block_id,
+            y: block.y,
+            height: block.height,
+        })
+    }
+
+    /// Scroll so that the given document position is visible, placing it
+    /// roughly 1/3 from the top of the viewport.
+    ///
+    /// Returns the new scroll offset.
+    pub fn scroll_to_position(&mut self, position: usize) -> f32 {
+        let rect = self.caret_rect(position);
+        let target_y = rect[1] + self.scroll_offset - self.viewport_height / 3.0;
+        self.scroll_offset = target_y.max(0.0);
+        self.scroll_offset
+    }
+
+    /// Scroll the minimum amount needed to make the current caret visible.
+    ///
+    /// Call after cursor movement (arrow keys, click, typing) to keep
+    /// the caret in view. Returns `Some(new_offset)` if scrolling occurred,
+    /// or `None` if the caret was already visible.
+    pub fn ensure_caret_visible(&mut self) -> Option<f32> {
+        if self.cursors.is_empty() {
+            return None;
+        }
+        let pos = self.cursors[0].position;
+        let rect = self.caret_rect(pos);
+        let caret_screen_y = rect[1];
+        let caret_screen_bottom = caret_screen_y + rect[3];
+        let margin = 10.0;
+        let old_offset = self.scroll_offset;
+
+        if caret_screen_y < 0.0 {
+            self.scroll_offset += caret_screen_y - margin;
+            self.scroll_offset = self.scroll_offset.max(0.0);
+        } else if caret_screen_bottom > self.viewport_height {
+            self.scroll_offset += caret_screen_bottom - self.viewport_height + margin;
+        }
+
+        if (self.scroll_offset - old_offset).abs() > 0.001 {
+            Some(self.scroll_offset)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "text-document")]
+enum FlowItemKind {
+    Block(crate::layout::block::BlockLayoutParams),
+    Table(crate::layout::table::TableLayoutParams),
+    Frame(crate::layout::frame::FrameLayoutParams),
+}
+
+impl Default for Typesetter {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -1,0 +1,401 @@
+use text_typeset::Typesetter;
+use text_typeset::font::resolve::resolve_font;
+use text_typeset::shaping::shaper::shape_text;
+
+const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
+
+fn setup() -> Typesetter {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts
+}
+
+// ── Atlas allocator tests ───────────────────────────────────────
+
+mod allocator {
+    use text_typeset::atlas::allocator::GlyphAtlas;
+
+    #[test]
+    fn new_atlas_has_correct_dimensions() {
+        let atlas = GlyphAtlas::new();
+        assert_eq!(atlas.width, 512);
+        assert_eq!(atlas.height, 512);
+        assert_eq!(atlas.pixels.len(), 512 * 512 * 4);
+        assert!(!atlas.dirty);
+    }
+
+    #[test]
+    fn allocate_small_rect_succeeds() {
+        let mut atlas = GlyphAtlas::new();
+        let alloc = atlas.allocate(16, 20);
+        assert!(alloc.is_some());
+        let alloc = alloc.unwrap();
+        let rect = alloc.rectangle;
+        assert!(rect.min.x >= 0);
+        assert!(rect.min.y >= 0);
+        // BucketedAtlasAllocator may round up to bucket sizes
+        assert!((rect.max.x - rect.min.x) as u32 >= 16);
+        assert!((rect.max.y - rect.min.y) as u32 >= 20);
+    }
+
+    #[test]
+    fn allocate_multiple_rects_dont_overlap() {
+        let mut atlas = GlyphAtlas::new();
+        let a1 = atlas.allocate(32, 32).unwrap();
+        let a2 = atlas.allocate(32, 32).unwrap();
+
+        let r1 = a1.rectangle;
+        let r2 = a2.rectangle;
+
+        // Rectangles should not overlap
+        let overlap_x = r1.min.x < r2.max.x && r2.min.x < r1.max.x;
+        let overlap_y = r1.min.y < r2.max.y && r2.min.y < r1.max.y;
+        assert!(
+            !(overlap_x && overlap_y),
+            "allocations overlap: {:?} and {:?}",
+            r1,
+            r2
+        );
+    }
+
+    #[test]
+    fn blit_mask_writes_rgba_pixels() {
+        let mut atlas = GlyphAtlas::new();
+        let alloc = atlas.allocate(2, 2).unwrap();
+        let x = alloc.rectangle.min.x as u32;
+        let y = alloc.rectangle.min.y as u32;
+
+        // Blit a 2x2 alpha mask: [128, 255, 0, 64]
+        atlas.blit_mask(x, y, 2, 2, &[128, 255, 0, 64]);
+
+        // Check first pixel: should be [255, 255, 255, 128]
+        let offset = ((y * atlas.width + x) * 4) as usize;
+        assert_eq!(atlas.pixels[offset], 255); // R
+        assert_eq!(atlas.pixels[offset + 1], 255); // G
+        assert_eq!(atlas.pixels[offset + 2], 255); // B
+        assert_eq!(atlas.pixels[offset + 3], 128); // A
+        assert!(atlas.dirty);
+    }
+
+    #[test]
+    fn blit_rgba_writes_color_pixels() {
+        let mut atlas = GlyphAtlas::new();
+        let alloc = atlas.allocate(1, 1).unwrap();
+        let x = alloc.rectangle.min.x as u32;
+        let y = alloc.rectangle.min.y as u32;
+
+        atlas.blit_rgba(x, y, 1, 1, &[10, 20, 30, 40]);
+
+        let offset = ((y * atlas.width + x) * 4) as usize;
+        assert_eq!(atlas.pixels[offset], 10);
+        assert_eq!(atlas.pixels[offset + 1], 20);
+        assert_eq!(atlas.pixels[offset + 2], 30);
+        assert_eq!(atlas.pixels[offset + 3], 40);
+    }
+
+    #[test]
+    fn allocate_triggers_grow_when_full() {
+        let mut atlas = GlyphAtlas::new(); // 512x512
+
+        // Fill the atlas with large blocks until allocation would fail without growing
+        let mut count = 0;
+        loop {
+            if atlas.allocate(128, 128).is_none() {
+                break;
+            }
+            count += 1;
+            if count > 200 {
+                // Safety limit — should never need this many 128x128 in 512x512
+                break;
+            }
+        }
+        // After growing, the atlas should be larger
+        assert!(
+            atlas.width > 512 || atlas.height > 512,
+            "atlas should have grown: {}x{}",
+            atlas.width,
+            atlas.height
+        );
+    }
+
+    #[test]
+    fn deallocate_frees_space() {
+        let mut atlas = GlyphAtlas::new();
+        let alloc = atlas.allocate(256, 256).unwrap();
+        let id = alloc.id;
+        let space_before = atlas.allocator.free_space();
+        atlas.deallocate(id);
+        let space_after = atlas.allocator.free_space();
+        assert!(
+            space_after >= space_before,
+            "free space should not decrease after deallocation"
+        );
+    }
+}
+
+// ── Rasterizer tests ────────────────────────────────────────────
+
+mod rasterizer {
+    use super::*;
+    use text_typeset::atlas::rasterizer::rasterize_glyph;
+
+    #[test]
+    fn rasterize_letter_a_produces_image() {
+        let ts = setup();
+        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
+        let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
+
+        // Shape 'A' to get its glyph ID
+        let run = shape_text(ts.font_registry(), &resolved, "A", 0).unwrap();
+        let glyph_id = run.glyphs[0].glyph_id;
+
+        let mut scale_ctx = swash::scale::ScaleContext::new();
+        let image = rasterize_glyph(
+            &mut scale_ctx,
+            &entry.data,
+            entry.face_index,
+            entry.swash_cache_key,
+            glyph_id,
+            16.0,
+        );
+
+        assert!(image.is_some(), "rasterization should succeed for 'A'");
+        let image = image.unwrap();
+        assert!(image.width > 0, "rasterized glyph should have width > 0");
+        assert!(image.height > 0, "rasterized glyph should have height > 0");
+        assert!(!image.data.is_empty(), "pixel data should not be empty");
+    }
+
+    #[test]
+    fn rasterized_glyph_has_nonzero_pixels() {
+        let ts = setup();
+        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
+        let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
+
+        let run = shape_text(ts.font_registry(), &resolved, "A", 0).unwrap();
+        let glyph_id = run.glyphs[0].glyph_id;
+
+        let mut scale_ctx = swash::scale::ScaleContext::new();
+        let image = rasterize_glyph(
+            &mut scale_ctx,
+            &entry.data,
+            entry.face_index,
+            entry.swash_cache_key,
+            glyph_id,
+            24.0,
+        )
+        .unwrap();
+
+        // At least some pixels should be non-zero (the glyph is not blank)
+        let has_nonzero = image.data.iter().any(|&b| b > 0);
+        assert!(
+            has_nonzero,
+            "rasterized 'A' should have non-zero pixel data"
+        );
+    }
+
+    #[test]
+    fn larger_size_produces_larger_glyph() {
+        let ts = setup();
+        let resolved_small =
+            resolve_font(ts.font_registry(), None, None, None, None, Some(12)).unwrap();
+        let _resolved_large =
+            resolve_font(ts.font_registry(), None, None, None, None, Some(48)).unwrap();
+        let entry = ts.font_registry().get(resolved_small.font_face_id).unwrap();
+
+        let run = shape_text(ts.font_registry(), &resolved_small, "M", 0).unwrap();
+        let glyph_id = run.glyphs[0].glyph_id;
+
+        let mut scale_ctx = swash::scale::ScaleContext::new();
+        let small = rasterize_glyph(
+            &mut scale_ctx,
+            &entry.data,
+            entry.face_index,
+            entry.swash_cache_key,
+            glyph_id,
+            12.0,
+        )
+        .unwrap();
+        let large = rasterize_glyph(
+            &mut scale_ctx,
+            &entry.data,
+            entry.face_index,
+            entry.swash_cache_key,
+            glyph_id,
+            48.0,
+        )
+        .unwrap();
+
+        assert!(
+            large.width > small.width && large.height > small.height,
+            "48px glyph ({}x{}) should be larger than 12px glyph ({}x{})",
+            large.width,
+            large.height,
+            small.width,
+            small.height
+        );
+    }
+
+    #[test]
+    fn space_glyph_rasterizes_to_empty_or_none() {
+        let ts = setup();
+        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
+        let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
+
+        let run = shape_text(ts.font_registry(), &resolved, " ", 0).unwrap();
+        let glyph_id = run.glyphs[0].glyph_id;
+
+        let mut scale_ctx = swash::scale::ScaleContext::new();
+        let image = rasterize_glyph(
+            &mut scale_ctx,
+            &entry.data,
+            entry.face_index,
+            entry.swash_cache_key,
+            glyph_id,
+            16.0,
+        );
+
+        // Space may rasterize to None (no outline) or to an empty image
+        if let Some(img) = image {
+            // If it does rasterize, it should have zero or very few pixels
+            assert!(
+                img.width * img.height <= 4,
+                "space glyph should be tiny or empty, got {}x{}",
+                img.width,
+                img.height
+            );
+        }
+        // None is also acceptable — space has no visible outline
+    }
+}
+
+// ── Glyph cache tests ──────────────────────────────────────────
+
+mod cache {
+    use text_typeset::FontFaceId;
+    use text_typeset::atlas::cache::{CachedGlyph, GlyphCache, GlyphCacheKey};
+
+    #[test]
+    fn cache_miss_returns_none() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphCacheKey::new(FontFaceId(0), 42, 16.0);
+        assert!(cache.get(&key).is_none());
+    }
+
+    #[test]
+    fn cache_insert_then_get() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphCacheKey::new(FontFaceId(0), 42, 16.0);
+        cache.insert(
+            key,
+            CachedGlyph {
+                alloc_id: etagere::AllocId::deserialize(1),
+                atlas_x: 10,
+                atlas_y: 20,
+                width: 8,
+                height: 12,
+                placement_left: 1,
+                placement_top: 10,
+                is_color: false,
+                last_used: 0,
+            },
+        );
+
+        let entry = cache.get(&key);
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.atlas_x, 10);
+        assert_eq!(entry.atlas_y, 20);
+        assert_eq!(entry.width, 8);
+        assert_eq!(entry.height, 12);
+    }
+
+    #[test]
+    fn different_sizes_are_different_keys() {
+        let mut cache = GlyphCache::new();
+        let key_16 = GlyphCacheKey::new(FontFaceId(0), 42, 16.0);
+        let key_24 = GlyphCacheKey::new(FontFaceId(0), 42, 24.0);
+
+        cache.insert(
+            key_16,
+            CachedGlyph {
+                alloc_id: etagere::AllocId::deserialize(1),
+                atlas_x: 0,
+                atlas_y: 0,
+                width: 8,
+                height: 12,
+                placement_left: 0,
+                placement_top: 0,
+                is_color: false,
+                last_used: 0,
+            },
+        );
+
+        assert!(cache.get(&key_16).is_some());
+        assert!(cache.get(&key_24).is_none());
+    }
+
+    #[test]
+    fn evict_unused_removes_stale_glyphs() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphCacheKey::new(FontFaceId(0), 42, 16.0);
+        cache.insert(
+            key,
+            CachedGlyph {
+                alloc_id: etagere::AllocId::deserialize(1),
+                atlas_x: 0,
+                atlas_y: 0,
+                width: 8,
+                height: 12,
+                placement_left: 0,
+                placement_top: 0,
+                is_color: false,
+                last_used: 0,
+            },
+        );
+        assert_eq!(cache.len(), 1);
+
+        // Advance 200 generations without accessing the glyph
+        for _ in 0..200 {
+            cache.advance_generation();
+        }
+
+        let evicted = cache.evict_unused();
+        assert_eq!(evicted.len(), 1, "should evict one stale glyph");
+        assert_eq!(cache.len(), 0, "cache should be empty after eviction");
+    }
+
+    #[test]
+    fn recently_used_glyphs_not_evicted() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphCacheKey::new(FontFaceId(0), 42, 16.0);
+        cache.insert(
+            key,
+            CachedGlyph {
+                alloc_id: etagere::AllocId::deserialize(1),
+                atlas_x: 0,
+                atlas_y: 0,
+                width: 8,
+                height: 12,
+                placement_left: 0,
+                placement_top: 0,
+                is_color: false,
+                last_used: 0,
+            },
+        );
+
+        // Advance 50 generations but keep using the glyph
+        for _ in 0..50 {
+            cache.advance_generation();
+            let _ = cache.get(&key); // marks as used
+        }
+
+        let evicted = cache.evict_unused();
+        assert!(
+            evicted.is_empty(),
+            "recently used glyphs should not be evicted"
+        );
+        assert_eq!(cache.len(), 1);
+    }
+}

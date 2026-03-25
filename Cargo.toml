@@ -1,0 +1,37 @@
+[package]
+name = "text-typeset"
+version = "0.0.1"
+authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
+homepage = "https://github.com/jacquetc/text-typeset"
+repository = "https://github.com/jacquetc/text-typeset"
+documentation = "https://docs.rs/text-typeset/"
+description = "Turns rich text documents into GPU-ready glyph quads"
+keywords = ["text", "document", "format"]
+categories = ["text-editors", "text-processing"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+edition = "2024"
+
+[features]
+default = ["text-document"]
+text-document = ["dep:text-document"]
+
+[dependencies]
+rustybuzz = "0.20"
+swash = "0.2"
+fontdb = "0.23"
+etagere = "0.3"
+unicode-linebreak = "0.1"
+unicode-bidi = "0.3"
+anyhow = "1.0"
+thiserror = "2.0"
+text-document = { path = "../text-document/crates/public_api", optional = true, version = "0.0.15" }
+
+[dev-dependencies]
+text-document = { path = "../text-document/crates/public_api" }
+
+[profile.release]
+lto = "fat"
+panic = "abort"
+strip = true
+codegen-units = 1
