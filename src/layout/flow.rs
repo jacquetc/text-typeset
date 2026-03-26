@@ -307,9 +307,7 @@ impl FlowLayout {
         let mut prev_bm = None;
         for item in &self.flow_order {
             match item {
-                FlowItem::Block {
-                    block_id: id, ..
-                } => {
+                FlowItem::Block { block_id: id, .. } => {
                     if *id == block_id {
                         return prev_bm;
                     }

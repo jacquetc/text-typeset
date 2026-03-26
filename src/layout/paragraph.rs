@@ -96,7 +96,15 @@ pub fn break_into_lines(
             } else {
                 0.0
             };
-            let line = build_line(&runs, &flat, line_start_glyph, break_at, metrics, indent, text);
+            let line = build_line(
+                &runs,
+                &flat,
+                line_start_glyph,
+                break_at,
+                metrics,
+                indent,
+                text,
+            );
             lines.push(line);
 
             line_start_glyph = break_at;

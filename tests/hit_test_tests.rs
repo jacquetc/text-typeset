@@ -609,7 +609,10 @@ fn hit_test_link_region_detected() {
     assert!(result.is_some());
     match result.unwrap().region {
         HitRegion::Link { .. } => {} // expected
-        other => panic!("expected Link region, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected Link region, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }
 

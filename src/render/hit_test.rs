@@ -161,9 +161,12 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion) 
                 if run.decorations.is_link {
                     // Report as link region. The adapter can look up the actual
                     // href from the document position.
-                    return (offset, HitRegion::Link {
-                        href: String::new(),
-                    });
+                    return (
+                        offset,
+                        HitRegion::Link {
+                            href: String::new(),
+                        },
+                    );
                 }
                 return (offset, HitRegion::Text);
             }
@@ -187,7 +190,8 @@ fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {
             glyph_x += glyph.x_advance;
         }
         // Only return from this run if the offset doesn't belong to a later run
-        let next_run_start = runs.get(i + 1)
+        let next_run_start = runs
+            .get(i + 1)
             .and_then(|r| r.shaped_run.glyphs.first())
             .map(|g| g.cluster as usize);
         match next_run_start {
@@ -201,4 +205,3 @@ fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {
         .map(|r| r.x + r.shaped_run.advance_width)
         .unwrap_or(0.0)
 }
-

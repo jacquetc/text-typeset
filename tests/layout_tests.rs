@@ -741,11 +741,9 @@ fn char_range_end_correct_for_multibyte_utf8() {
     // char_range uses char offsets, not byte offsets
     let char_count = text.chars().count(); // 3
     assert_eq!(
-        lines[0].char_range.end,
-        char_count,
+        lines[0].char_range.end, char_count,
         "char_range.end should be {} (char count) for multibyte text, got {}",
-        char_count,
-        lines[0].char_range.end
+        char_count, lines[0].char_range.end
     );
 }
 
@@ -764,11 +762,7 @@ fn layout_blocks_matches_add_block_sequence() {
 
     // Method 1: layout_blocks
     let mut flow1 = FlowLayout::new();
-    flow1.layout_blocks(
-        ts.font_registry(),
-        vec![b1.clone(), b2.clone()],
-        800.0,
-    );
+    flow1.layout_blocks(ts.font_registry(), vec![b1.clone(), b2.clone()], 800.0);
 
     // Method 2: clear + add_block loop
     let mut flow2 = FlowLayout::new();
@@ -815,7 +809,11 @@ fn relayout_block_handles_top_margin_change() {
     b2.top_margin = 5.0;
     let b3 = make_block_params(3, "Third.");
 
-    flow.layout_blocks(ts.font_registry(), vec![b1.clone(), b2.clone(), b3.clone()], 800.0);
+    flow.layout_blocks(
+        ts.font_registry(),
+        vec![b1.clone(), b2.clone(), b3.clone()],
+        800.0,
+    );
 
     let y2_before = flow.blocks.get(&2).unwrap().y;
     let y3_before = flow.blocks.get(&3).unwrap().y;

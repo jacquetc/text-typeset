@@ -112,7 +112,8 @@ fn find_x_for_offset_in_line(line: &LayoutLine, offset: usize) -> f32 {
             glyph_x += glyph.x_advance;
         }
         // Only return from this run if the offset doesn't belong to a later run
-        let next_run_start = runs.get(i + 1)
+        let next_run_start = runs
+            .get(i + 1)
             .and_then(|r| r.shaped_run.glyphs.first())
             .map(|g| g.cluster as usize);
         match next_run_start {
