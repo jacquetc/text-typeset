@@ -177,7 +177,8 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion) 
 }
 
 fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {
-    for run in &line.runs {
+    let runs = &line.runs;
+    for (i, run) in runs.iter().enumerate() {
         let mut glyph_x = run.x;
         for glyph in &run.shaped_run.glyphs {
             if glyph.cluster as usize >= offset {
@@ -185,9 +186,13 @@ fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {
             }
             glyph_x += glyph.x_advance;
         }
-        // If offset is past all glyphs in this run, x is at the run end
-        if offset <= line.char_range.end {
-            return glyph_x;
+        // Only return from this run if the offset doesn't belong to a later run
+        let next_run_start = runs.get(i + 1)
+            .and_then(|r| r.shaped_run.glyphs.first())
+            .map(|g| g.cluster as usize);
+        match next_run_start {
+            Some(next_start) if offset >= next_start => continue,
+            _ => return glyph_x,
         }
     }
     // Fallback: end of line

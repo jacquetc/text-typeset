@@ -43,8 +43,20 @@ pub fn resolve_font(
         });
     }
 
-    // Fall back to default font
+    // Fall back to default font, but still try to match weight/italic
+    // by querying for a variant of the default font's family.
     let default_id = registry.default_font()?;
+    if weight != 400 || italic {
+        if let Some(variant_id) = registry.query_variant(default_id, weight, italic) {
+            let variant_entry = registry.get(variant_id)?;
+            return Some(ResolvedFont {
+                font_face_id: variant_id,
+                size_px,
+                face_index: variant_entry.face_index,
+                swash_cache_key: variant_entry.swash_cache_key,
+            });
+        }
+    }
     let entry = registry.get(default_id)?;
     Some(ResolvedFont {
         font_face_id: default_id,

@@ -153,6 +153,15 @@ impl FontRegistry {
             .and_then(|opt| opt.as_ref())
     }
 
+    /// Query for a variant (different weight/style) of an existing registered font.
+    /// Looks up the family name of `base_face` and queries fontdb for a match.
+    pub fn query_variant(&self, base_face: FontFaceId, weight: u16, italic: bool) -> Option<FontFaceId> {
+        let entry = self.get(base_face)?;
+        let face_info = self.fontdb.face(entry.fontdb_id)?;
+        let family_name = face_info.families.first().map(|(name, _)| name.as_str())?;
+        self.query_font(family_name, weight, italic)
+    }
+
     /// Find our FontFaceId for a fontdb ID.
     fn fontdb_id_to_face_id(&self, fontdb_id: fontdb::ID) -> Option<FontFaceId> {
         self.fonts.iter().enumerate().find_map(|(i, entry)| {

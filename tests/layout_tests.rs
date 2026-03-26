@@ -738,12 +738,13 @@ fn char_range_end_correct_for_multibyte_utf8() {
     let text = "\u{00e9}\u{00e8}\u{00ea}"; // e-acute, e-grave, e-circumflex
     let lines = layout_text(&ts, text, 800.0, Alignment::Left);
     assert_eq!(lines.len(), 1);
-    // 3 chars x 2 bytes = 6 bytes
+    // char_range uses char offsets, not byte offsets
+    let char_count = text.chars().count(); // 3
     assert_eq!(
         lines[0].char_range.end,
-        text.len(),
-        "char_range.end should be {} for multibyte text, got {}",
-        text.len(),
+        char_count,
+        "char_range.end should be {} (char count) for multibyte text, got {}",
+        char_count,
         lines[0].char_range.end
     );
 }

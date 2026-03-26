@@ -7,6 +7,11 @@ use crate::layout::line::{LayoutLine, PositionedRun, RunDecorations};
 use crate::shaping::run::ShapedRun;
 use crate::shaping::shaper::FontMetricsPx;
 
+/// Convert a byte offset within a UTF-8 string to a char offset.
+fn byte_offset_to_char_offset(text: &str, byte_offset: usize) -> usize {
+    text[..byte_offset.min(text.len())].chars().count()
+}
+
 /// Text alignment within a line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Alignment {
@@ -305,18 +310,18 @@ fn build_line(
 
     let width = x - indent;
 
-    // Compute char range from cluster values
-    let char_start = if start < flat.len() {
+    // Compute char range from cluster values.
+    // Clusters from rustybuzz are byte offsets — convert to char offsets
+    // so that positions match text-document's character-based coordinates.
+    let byte_start = if start < flat.len() {
         flat[start].cluster as usize
     } else {
         0
     };
-    let char_end = if end > 0 && end <= flat.len() {
+    let byte_end = if end > 0 && end <= flat.len() {
         if end < flat.len() {
             flat[end].cluster as usize
         } else {
-            // Compute the correct end by finding the UTF-8 byte length
-            // of the character at the last glyph's cluster offset.
             let byte_offset = flat[end - 1].cluster as usize;
             let char_len = text
                 .get(byte_offset..)
@@ -326,8 +331,17 @@ fn build_line(
             byte_offset + char_len
         }
     } else {
-        char_start
+        byte_start
     };
+    let char_start = byte_offset_to_char_offset(text, byte_start);
+    let char_end = byte_offset_to_char_offset(text, byte_end);
+
+    // Convert glyph cluster values from byte offsets to char offsets
+    for run in &mut positioned_runs {
+        for glyph in &mut run.shaped_run.glyphs {
+            glyph.cluster = byte_offset_to_char_offset(text, glyph.cluster as usize) as u32;
+        }
+    }
 
     let line_height = metrics.ascent + metrics.descent + metrics.leading;
 

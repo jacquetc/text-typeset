@@ -95,6 +95,7 @@ pub fn layout_block(
     let effective_left_margin = params.left_margin + params.list_indent;
     let content_width = (available_width - effective_left_margin - params.right_margin).max(0.0);
 
+
     // Resolve fonts and shape each fragment
     let mut shaped_runs = Vec::new();
     let mut default_metrics: Option<FontMetricsPx> = None;
