@@ -337,8 +337,8 @@ impl Typesetter {
     ///
     /// Returns `[x, y, width, height]` in screen pixels. Use this to report
     /// the caret position to the platform IME system for composition window
-    /// placement. For drawing the caret, use the [`DecorationKind::Cursor`]
-    /// entry in [`RenderFrame::decorations`] instead.
+    /// placement. For drawing the caret, use the [`crate::DecorationKind::Cursor`]
+    /// entry in [`crate::RenderFrame::decorations`] instead.
     pub fn caret_rect(&self, position: usize) -> [f32; 4] {
         crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position)
     }

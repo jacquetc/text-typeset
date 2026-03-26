@@ -2,7 +2,7 @@
 //!
 //! Turns rich text documents into GPU-ready glyph quads.
 //!
-//! Typesetting crate for the [`text-document`] ecosystem. Takes a rich text
+//! Typesetting crate for the `text-document` ecosystem. Takes a rich text
 //! document model (styled paragraphs, tables, lists, frames) and produces
 //! positioned glyph quads, decoration rectangles, and a glyph atlas texture
 //! that any GPU framework can render in a few draw calls.
