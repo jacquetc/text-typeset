@@ -1,3 +1,9 @@
+[![crates.io](https://img.shields.io/crates/v/text-typeset?style=flat-square&logo=rust)](https://crates.io/crates/text-typeset)
+[![API](https://docs.rs/text-typeset/badge.svg)](https://docs.rs/text-typeset)
+![quality](https://img.shields.io/github/actions/workflow/status/jacquetc/text-typeset/ci.yml)
+[![codecov](https://codecov.io/gh/jacquetc/text-typeset/branch/main/graph/badge.svg?token=AONY49DQM0)](https://codecov.io/gh/jacquetc/text-typeset)
+[![license](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue?style=flat-square)](#license)
+
 # text-typeset
 
 Turns rich text documents into GPU-ready glyph quads.
