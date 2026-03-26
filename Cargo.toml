@@ -1,6 +1,6 @@
 [package]
 name = "text-typeset"
-version = "0.0.1"
+version = "0.0.3"
 authors = ["Cyril Jacquet <cyril.jacquet@ferntech.eu>"]
 homepage = "https://github.com/jacquetc/text-typeset"
 repository = "https://github.com/jacquetc/text-typeset"
