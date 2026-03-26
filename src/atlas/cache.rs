@@ -40,7 +40,7 @@ pub struct CachedGlyph {
 /// in the current generation. `evict_unused` removes glyphs not used
 /// for `max_idle_frames` generations and deallocates their atlas space.
 pub struct GlyphCache {
-    pub entries: HashMap<GlyphCacheKey, CachedGlyph>,
+    pub(crate) entries: HashMap<GlyphCacheKey, CachedGlyph>,
     generation: u64,
 }
 

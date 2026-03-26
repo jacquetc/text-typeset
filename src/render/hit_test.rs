@@ -156,13 +156,14 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion) 
             let glyph_mid = glyph_x + glyph.x_advance / 2.0;
 
             if local_x < glyph_mid {
-                // Click is on the left half of this glyph -position before it
+                // Click is on the left half of this glyph - position before it
                 let offset = glyph.cluster as usize;
-                // Check for link
-                if run.decorations.is_link
-                    && let Some(href) = find_link_href(&run.shaped_run)
-                {
-                    return (offset, HitRegion::Link { href });
+                if run.decorations.is_link {
+                    // Report as link region. The adapter can look up the actual
+                    // href from the document position.
+                    return (offset, HitRegion::Link {
+                        href: String::new(),
+                    });
                 }
                 return (offset, HitRegion::Text);
             }
@@ -196,8 +197,3 @@ fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {
         .unwrap_or(0.0)
 }
 
-fn find_link_href(_run: &crate::shaping::run::ShapedRun) -> Option<String> {
-    // Link href is not currently stored in ShapedRun.
-    // Will be added when text-document integration provides anchor_href.
-    None
-}

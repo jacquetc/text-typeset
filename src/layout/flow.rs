@@ -184,56 +184,22 @@ impl FlowLayout {
         block_params: Vec<BlockLayoutParams>,
         available_width: f32,
     ) {
-        self.blocks.clear();
-        self.tables.clear();
-        self.frames.clear();
-        self.flow_order.clear();
-
-        let mut y = 0.0f32;
-
-        for params in &block_params {
-            let mut block = layout_block(registry, params, available_width);
-
-            // Margin collapsing: the space between two blocks is the max of
-            // the first block's bottom margin and the second block's top margin,
-            // not the sum.
-            if let Some(FlowItem::Block {
-                block_id: prev_id, ..
-            }) = self.flow_order.last()
-            {
-                if let Some(prev_block) = self.blocks.get(prev_id) {
-                    let collapsed = prev_block.bottom_margin.max(block.top_margin);
-                    // Undo the previous block's bottom margin and this block's top margin,
-                    // apply the collapsed margin instead.
-                    y -= prev_block.bottom_margin;
-                    y += collapsed;
-                } else {
-                    y += block.top_margin;
-                }
-            } else {
-                y += block.top_margin;
-            }
-
-            block.y = y;
-            let block_height = block.height - block.top_margin - block.bottom_margin;
-            y += block_height + block.bottom_margin;
-
-            self.flow_order.push(FlowItem::Block {
-                block_id: block.block_id,
-                y: block.y,
-                height: block.height,
-            });
-            self.blocks.insert(block.block_id, block);
-        }
-
-        self.content_height = y;
+        self.clear();
         // Note: viewport_width is NOT set here. It's a display property
         // set by Typesetter::set_viewport(), not a layout property.
         // available_width is the layout width which may differ from viewport
         // when using ContentWidthMode::Fixed.
+        for params in &block_params {
+            self.add_block(registry, params, available_width);
+        }
     }
 
-    /// Update a single block's layout and shift subsequent blocks if height changed.
+    /// Update a single block's layout and shift subsequent blocks if the
+    /// position or height changed.
+    ///
+    /// If the block's top margin changed, its y position is recomputed using
+    /// margin collapsing with the previous block. Subsequent items are shifted
+    /// by the resulting delta.
     pub fn relayout_block(
         &mut self,
         registry: &FontRegistry,
@@ -241,35 +207,56 @@ impl FlowLayout {
         available_width: f32,
     ) {
         let block_id = params.block_id;
+        let old_y = self.blocks.get(&block_id).map(|b| b.y).unwrap_or(0.0);
         let old_height = self.blocks.get(&block_id).map(|b| b.height).unwrap_or(0.0);
+        let old_top_margin = self
+            .blocks
+            .get(&block_id)
+            .map(|b| b.top_margin)
+            .unwrap_or(0.0);
+        let old_bottom_margin = self
+            .blocks
+            .get(&block_id)
+            .map(|b| b.bottom_margin)
+            .unwrap_or(0.0);
+        let old_content = old_height - old_top_margin - old_bottom_margin;
+        let old_end = old_y + old_content + old_bottom_margin;
 
         let mut block = layout_block(registry, params, available_width);
+        block.y = old_y;
 
-        // Preserve the old y position
-        if let Some(old_block) = self.blocks.get(&block_id) {
-            block.y = old_block.y;
+        // If top margin changed, recompute this block's y position
+        if (block.top_margin - old_top_margin).abs() > 0.001 {
+            let prev_bm = self.prev_block_bottom_margin(block_id).unwrap_or(0.0);
+            let old_collapsed = prev_bm.max(old_top_margin);
+            let new_collapsed = prev_bm.max(block.top_margin);
+            block.y = old_y + (new_collapsed - old_collapsed);
         }
 
-        let new_height = block.height;
-        let delta = new_height - old_height;
+        let new_content = block.height - block.top_margin - block.bottom_margin;
+        let new_end = block.y + new_content + block.bottom_margin;
+        let delta = new_end - old_end;
 
+        let new_y = block.y;
+        let new_height = block.height;
         self.blocks.insert(block_id, block);
 
         // Update flow_order entry
         for item in &mut self.flow_order {
             if let FlowItem::Block {
                 block_id: id,
+                y,
                 height,
-                ..
             } = item
                 && *id == block_id
             {
+                *y = new_y;
                 *height = new_height;
                 break;
             }
         }
 
-        // Shift subsequent blocks if height changed
+        // Shift subsequent items if position or height changed
         if delta.abs() > 0.001 {
             let mut found = false;
             for item in &mut self.flow_order {
@@ -313,5 +300,29 @@ impl FlowLayout {
             }
             self.content_height += delta;
         }
+    }
+
+    /// Find the bottom margin of the block immediately before `block_id` in flow order.
+    fn prev_block_bottom_margin(&self, block_id: usize) -> Option<f32> {
+        let mut prev_bm = None;
+        for item in &self.flow_order {
+            match item {
+                FlowItem::Block {
+                    block_id: id, ..
+                } => {
+                    if *id == block_id {
+                        return prev_bm;
+                    }
+                    if let Some(b) = self.blocks.get(id) {
+                        prev_bm = Some(b.bottom_margin);
+                    }
+                }
+                _ => {
+                    // Non-block items reset margin collapsing
+                    prev_bm = None;
+                }
+            }
+        }
+        None
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::Range;
 
 use unicode_linebreak::{BreakOpportunity, linebreaks};
@@ -48,7 +49,7 @@ pub fn break_into_lines(
     let breaks: Vec<(usize, BreakOpportunity)> = linebreaks(text).collect();
 
     // Build a set of allowed break positions (glyph indices)
-    let break_points = map_breaks_to_glyph_indices(&flat, &breaks);
+    let break_points: HashSet<usize> = map_breaks_to_glyph_indices(&flat, &breaks);
 
     // Greedy line wrapping
     let mut lines = Vec::new();
@@ -90,7 +91,7 @@ pub fn break_into_lines(
             } else {
                 0.0
             };
-            let line = build_line(&runs, &flat, line_start_glyph, break_at, metrics, indent);
+            let line = build_line(&runs, &flat, line_start_glyph, break_at, metrics, indent, text);
             lines.push(line);
 
             line_start_glyph = break_at;
@@ -120,6 +121,7 @@ pub fn break_into_lines(
             } else {
                 0.0
             },
+            text,
         );
         lines.push(line);
     }
@@ -192,17 +194,15 @@ fn flatten_runs(runs: &[ShapedRun]) -> Vec<FlatGlyph> {
 fn map_breaks_to_glyph_indices(
     flat: &[FlatGlyph],
     breaks: &[(usize, BreakOpportunity)],
-) -> Vec<usize> {
-    let mut result = Vec::new();
+) -> HashSet<usize> {
+    let mut result = HashSet::new();
     for &(byte_offset, _opportunity) in breaks {
         // Find the first glyph whose cluster starts at or after byte_offset
         if let Some(glyph_idx) = flat.iter().position(|g| g.cluster as usize >= byte_offset) {
-            if !result.contains(&glyph_idx) {
-                result.push(glyph_idx);
-            }
+            result.insert(glyph_idx);
         } else {
             // Break is at or past end of text
-            result.push(flat.len());
+            result.insert(flat.len());
         }
     }
     result
@@ -239,6 +239,7 @@ fn build_line(
     end: usize,
     metrics: &FontMetricsPx,
     indent: f32,
+    text: &str,
 ) -> LayoutLine {
     // Group consecutive glyphs by run_index to reconstruct PositionedRuns
     let mut positioned_runs = Vec::new();
@@ -314,8 +315,15 @@ fn build_line(
         if end < flat.len() {
             flat[end].cluster as usize
         } else {
-            // Use end of last glyph's run text range
-            flat[end - 1].cluster as usize + 1 // approximate
+            // Compute the correct end by finding the UTF-8 byte length
+            // of the character at the last glyph's cluster offset.
+            let byte_offset = flat[end - 1].cluster as usize;
+            let char_len = text
+                .get(byte_offset..)
+                .and_then(|s| s.chars().next())
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            byte_offset + char_len
         }
     } else {
         char_start

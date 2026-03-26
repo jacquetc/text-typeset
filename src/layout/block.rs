@@ -36,6 +36,7 @@ pub struct ShapedListMarker {
 
 /// Parameters extracted from text-document's BlockFormat / TextFormat.
 /// This is a plain struct so block layout doesn't depend on text-document types.
+#[derive(Clone)]
 pub struct BlockLayoutParams {
     pub block_id: usize,
     pub position: usize,
@@ -65,6 +66,7 @@ pub struct BlockLayoutParams {
 }
 
 /// A text fragment with its formatting parameters.
+#[derive(Clone)]
 pub struct FragmentParams {
     pub text: String,
     pub offset: usize,

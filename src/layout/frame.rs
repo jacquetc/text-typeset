@@ -4,16 +4,26 @@ use crate::layout::block::{BlockLayout, BlockLayoutParams};
 use crate::layout::table::{TableLayout, TableLayoutParams, layout_table};
 
 /// Frame position type (from text-document's FramePosition).
+///
+/// **Note on floats**: `FloatLeft` and `FloatRight` currently place the frame
+/// at the correct x position but do not implement content wrapping (text does
+/// not flow beside the float). They advance `content_height` like `Inline`,
+/// so subsequent content appears below rather than beside the float.
+/// True float exclusion zones would require tracking available width per
+/// y-range during paragraph layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FramePosition {
-    /// Inline: rendered in normal flow order.
+    /// Inline: rendered in normal flow order, advances content_height.
     #[default]
     Inline,
-    /// Float left (content wraps around -not yet implemented, treated as Inline).
+    /// Float left: placed at x=0, advances content_height.
+    /// Content wrapping is not yet implemented.
     FloatLeft,
-    /// Float right (content wraps around -not yet implemented, treated as Inline).
+    /// Float right: placed at x=available_width - frame_width, advances content_height.
+    /// Content wrapping is not yet implemented.
     FloatRight,
-    /// Absolute positioning (not yet implemented, treated as Inline).
+    /// Absolute: placed at (margin_left, margin_top) from document origin.
+    /// Does not affect flow or content_height.
     Absolute,
 }
 

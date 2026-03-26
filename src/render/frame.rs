@@ -57,8 +57,10 @@ pub fn build_render_frame(
                     continue;
                 }
                 if let Some(table) = flow.tables.get(table_id) {
-                    render_table(
+                    render_table_cells(
                         table,
+                        0.0,
+                        0.0,
                         registry,
                         atlas,
                         cache,
@@ -100,8 +102,10 @@ pub fn build_render_frame(
         }
 
         if let Some(block) = flow.blocks.get(&block_id) {
-            render_block(
+            render_block_at_offset(
                 block,
+                0.0,
+                0.0,
                 registry,
                 atlas,
                 cache,
@@ -131,15 +135,22 @@ pub fn build_render_frame(
     render_frame.atlas_dirty = atlas.dirty;
     render_frame.atlas_width = atlas.width;
     render_frame.atlas_height = atlas.height;
-    // Clone pixels only if dirty (the adapter needs the full buffer)
+    // Reuse existing allocation when capacity is sufficient
     if atlas.dirty {
-        render_frame.atlas_pixels = atlas.pixels.clone();
+        render_frame.atlas_pixels.clone_from(&atlas.pixels);
         atlas.dirty = false;
     }
 }
 
-fn render_block(
+/// Render a block's glyphs at the given offset.
+///
+/// Handles list markers and all lines. The offset is (0, 0) for top-level
+/// blocks, and non-zero for blocks inside table cells or frames.
+#[allow(clippy::too_many_arguments)]
+fn render_block_at_offset(
     block: &BlockLayout,
+    offset_x: f32,
+    offset_y: f32,
     registry: &FontRegistry,
     atlas: &mut GlyphAtlas,
     cache: &mut GlyphCache,
@@ -151,10 +162,10 @@ fn render_block(
     if let Some(marker) = &block.list_marker
         && let Some(first_line) = block.lines.first()
     {
-        let baseline_y = block.y + first_line.y;
+        let baseline_y = offset_y + block.y + first_line.y;
         render_run_glyphs(
             &marker.run,
-            marker.x,
+            offset_x + marker.x,
             baseline_y,
             registry,
             atlas,
@@ -166,10 +177,10 @@ fn render_block(
     }
 
     for line in &block.lines {
-        let line_y = block.y + line.y;
+        let line_y = offset_y + block.y + line.y;
 
         for positioned_run in &line.runs {
-            let pen_x = block.left_margin + positioned_run.x;
+            let pen_x = offset_x + block.left_margin + positioned_run.x;
             render_run_glyphs(
                 &positioned_run.shaped_run,
                 pen_x,
@@ -181,6 +192,53 @@ fn render_block(
                 scroll_offset,
                 render_frame,
             );
+        }
+    }
+}
+
+/// Render all cells in a table at the given offset.
+///
+/// The offset is (0, 0) for top-level tables, and non-zero for tables
+/// inside frames.
+#[allow(clippy::too_many_arguments)]
+fn render_table_cells(
+    table: &crate::layout::table::TableLayout,
+    offset_x: f32,
+    offset_y: f32,
+    registry: &FontRegistry,
+    atlas: &mut GlyphAtlas,
+    cache: &mut GlyphCache,
+    scale_context: &mut swash::scale::ScaleContext,
+    scroll_offset: f32,
+    render_frame: &mut RenderFrame,
+) {
+    for cell in &table.cell_layouts {
+        if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
+            continue;
+        }
+        let cell_x = offset_x + table.column_xs[cell.column];
+        let cell_y = offset_y + table.y + table.row_ys[cell.row];
+
+        for block in &cell.blocks {
+            render_block_at_offset(
+                block,
+                cell_x,
+                cell_y,
+                registry,
+                atlas,
+                cache,
+                scale_context,
+                scroll_offset,
+                render_frame,
+            );
+            let cell_w = table
+                .column_content_widths
+                .get(cell.column)
+                .copied()
+                .unwrap_or(200.0);
+            let decos =
+                generate_block_decorations(block, registry, scroll_offset, cell_x, cell_y, cell_w);
+            render_frame.decorations.extend(decos);
         }
     }
 }
@@ -199,41 +257,17 @@ fn render_frame_layout(
 
     // Render nested blocks
     for block in &frame.blocks {
-        // List marker
-        if let Some(marker) = &block.list_marker
-            && let Some(first_line) = block.lines.first()
-        {
-            let baseline_y = offset_y + block.y + first_line.y;
-            render_run_glyphs(
-                &marker.run,
-                marker.x + offset_x,
-                baseline_y,
-                registry,
-                atlas,
-                cache,
-                scale_context,
-                scroll_offset,
-                render_frame,
-            );
-        }
-        for line in &block.lines {
-            let line_y = offset_y + block.y + line.y;
-            for positioned_run in &line.runs {
-                let pen_x = offset_x + block.left_margin + positioned_run.x;
-                render_run_glyphs(
-                    &positioned_run.shaped_run,
-                    pen_x,
-                    line_y,
-                    registry,
-                    atlas,
-                    cache,
-                    scale_context,
-                    scroll_offset,
-                    render_frame,
-                );
-            }
-        }
-        // Text decorations
+        render_block_at_offset(
+            block,
+            offset_x,
+            offset_y,
+            registry,
+            atlas,
+            cache,
+            scale_context,
+            scroll_offset,
+            render_frame,
+        );
         let decos = generate_block_decorations(
             block,
             registry,
@@ -247,64 +281,17 @@ fn render_frame_layout(
 
     // Render nested tables
     for table in &frame.tables {
-        let table_offset_y = offset_y + table.y;
-        for cell in &table.cell_layouts {
-            if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
-                continue;
-            }
-            let cell_x = offset_x + table.column_xs[cell.column];
-            let cell_y = table_offset_y + table.row_ys[cell.row];
-            for block in &cell.blocks {
-                // List marker
-                if let Some(marker) = &block.list_marker
-                    && let Some(first_line) = block.lines.first()
-                {
-                    let baseline_y = cell_y + block.y + first_line.y;
-                    render_run_glyphs(
-                        &marker.run,
-                        marker.x + cell_x,
-                        baseline_y,
-                        registry,
-                        atlas,
-                        cache,
-                        scale_context,
-                        scroll_offset,
-                        render_frame,
-                    );
-                }
-                for line in &block.lines {
-                    let line_y = cell_y + block.y + line.y;
-                    for positioned_run in &line.runs {
-                        let pen_x = cell_x + block.left_margin + positioned_run.x;
-                        render_run_glyphs(
-                            &positioned_run.shaped_run,
-                            pen_x,
-                            line_y,
-                            registry,
-                            atlas,
-                            cache,
-                            scale_context,
-                            scroll_offset,
-                            render_frame,
-                        );
-                    }
-                }
-                let cell_w = table
-                    .column_content_widths
-                    .get(cell.column)
-                    .copied()
-                    .unwrap_or(200.0);
-                let decos = generate_block_decorations(
-                    block,
-                    registry,
-                    scroll_offset,
-                    cell_x,
-                    cell_y,
-                    cell_w,
-                );
-                render_frame.decorations.extend(decos);
-            }
-        }
+        render_table_cells(
+            table,
+            offset_x,
+            offset_y,
+            registry,
+            atlas,
+            cache,
+            scale_context,
+            scroll_offset,
+            render_frame,
+        );
     }
 
     // Frame border decorations
@@ -339,70 +326,6 @@ fn render_frame_layout(
             color,
             kind: crate::types::DecorationKind::Background,
         });
-    }
-}
-
-fn render_table(
-    table: &crate::layout::table::TableLayout,
-    registry: &FontRegistry,
-    atlas: &mut GlyphAtlas,
-    cache: &mut GlyphCache,
-    scale_context: &mut swash::scale::ScaleContext,
-    scroll_offset: f32,
-    render_frame: &mut RenderFrame,
-) {
-    for cell in &table.cell_layouts {
-        if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
-            continue;
-        }
-        let cell_x = table.column_xs[cell.column];
-        let cell_y = table.y + table.row_ys[cell.row];
-
-        for block in &cell.blocks {
-            // List marker
-            if let Some(marker) = &block.list_marker
-                && let Some(first_line) = block.lines.first()
-            {
-                let baseline_y = cell_y + block.y + first_line.y;
-                render_run_glyphs(
-                    &marker.run,
-                    marker.x + cell_x,
-                    baseline_y,
-                    registry,
-                    atlas,
-                    cache,
-                    scale_context,
-                    scroll_offset,
-                    render_frame,
-                );
-            }
-            for line in &block.lines {
-                let line_y = cell_y + block.y + line.y;
-                for positioned_run in &line.runs {
-                    let pen_x = cell_x + block.left_margin + positioned_run.x;
-                    render_run_glyphs(
-                        &positioned_run.shaped_run,
-                        pen_x,
-                        line_y,
-                        registry,
-                        atlas,
-                        cache,
-                        scale_context,
-                        scroll_offset,
-                        render_frame,
-                    );
-                }
-            }
-            // Text decorations
-            let cell_w = table
-                .column_content_widths
-                .get(cell.column)
-                .copied()
-                .unwrap_or(200.0);
-            let decos =
-                generate_block_decorations(block, registry, scroll_offset, cell_x, cell_y, cell_w);
-            render_frame.decorations.extend(decos);
-        }
     }
 }
 

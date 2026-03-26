@@ -714,3 +714,132 @@ fn background_color_stored_in_layout() {
         "background_color should be stored in BlockLayout"
     );
 }
+
+// ── char_range correctness ──────────────────────────────────────
+
+#[test]
+fn char_range_end_correct_for_ascii() {
+    let ts = setup();
+    let text = "Hello";
+    let lines = layout_text(&ts, text, 800.0, Alignment::Left);
+    assert_eq!(lines.len(), 1);
+    // For ASCII, char_range.end should be text.len() (5)
+    assert_eq!(
+        lines[0].char_range.end,
+        text.len(),
+        "char_range.end should equal text byte length for ASCII"
+    );
+}
+
+#[test]
+fn char_range_end_correct_for_multibyte_utf8() {
+    let ts = setup();
+    // Each character here is 2 bytes in UTF-8
+    let text = "\u{00e9}\u{00e8}\u{00ea}"; // e-acute, e-grave, e-circumflex
+    let lines = layout_text(&ts, text, 800.0, Alignment::Left);
+    assert_eq!(lines.len(), 1);
+    // 3 chars x 2 bytes = 6 bytes
+    assert_eq!(
+        lines[0].char_range.end,
+        text.len(),
+        "char_range.end should be {} for multibyte text, got {}",
+        text.len(),
+        lines[0].char_range.end
+    );
+}
+
+// ── layout_blocks / add_block equivalence ───────────────────────
+
+#[test]
+fn layout_blocks_matches_add_block_sequence() {
+    let ts = setup();
+
+    let mut b1 = make_block_params(1, "First paragraph.");
+    b1.top_margin = 10.0;
+    b1.bottom_margin = 20.0;
+    let mut b2 = make_block_params(2, "Second paragraph.");
+    b2.top_margin = 15.0;
+    b2.bottom_margin = 5.0;
+
+    // Method 1: layout_blocks
+    let mut flow1 = FlowLayout::new();
+    flow1.layout_blocks(
+        ts.font_registry(),
+        vec![b1.clone(), b2.clone()],
+        800.0,
+    );
+
+    // Method 2: clear + add_block loop
+    let mut flow2 = FlowLayout::new();
+    flow2.add_block(ts.font_registry(), &b1, 800.0);
+    flow2.add_block(ts.font_registry(), &b2, 800.0);
+
+    // Both should produce identical results
+    assert!(
+        (flow1.content_height - flow2.content_height).abs() < 0.001,
+        "content_height mismatch: layout_blocks={}, add_block={}",
+        flow1.content_height,
+        flow2.content_height
+    );
+
+    let y1_a = flow1.blocks.get(&1).unwrap().y;
+    let y1_b = flow2.blocks.get(&1).unwrap().y;
+    assert!(
+        (y1_a - y1_b).abs() < 0.001,
+        "block 1 y mismatch: {} vs {}",
+        y1_a,
+        y1_b
+    );
+
+    let y2_a = flow1.blocks.get(&2).unwrap().y;
+    let y2_b = flow2.blocks.get(&2).unwrap().y;
+    assert!(
+        (y2_a - y2_b).abs() < 0.001,
+        "block 2 y mismatch: {} vs {}",
+        y2_a,
+        y2_b
+    );
+}
+
+// ── relayout with margin changes ────────────────────────────────
+
+#[test]
+fn relayout_block_handles_top_margin_change() {
+    let ts = setup();
+    let mut flow = FlowLayout::new();
+
+    let mut b1 = make_block_params(1, "First.");
+    b1.bottom_margin = 10.0;
+    let mut b2 = make_block_params(2, "Second.");
+    b2.top_margin = 5.0;
+    let b3 = make_block_params(3, "Third.");
+
+    flow.layout_blocks(ts.font_registry(), vec![b1.clone(), b2.clone(), b3.clone()], 800.0);
+
+    let y2_before = flow.blocks.get(&2).unwrap().y;
+    let y3_before = flow.blocks.get(&3).unwrap().y;
+
+    // Increase block 2's top margin from 5 to 30
+    let mut b2_updated = make_block_params(2, "Second.");
+    b2_updated.top_margin = 30.0;
+    flow.relayout_block(ts.font_registry(), &b2_updated, 800.0);
+
+    let y2_after = flow.blocks.get(&2).unwrap().y;
+    let y3_after = flow.blocks.get(&3).unwrap().y;
+
+    // Block 2 should move down (larger margin)
+    assert!(
+        y2_after > y2_before,
+        "block 2 should move down with larger top margin: {} -> {}",
+        y2_before,
+        y2_after
+    );
+
+    // Block 3 should also shift down
+    assert!(
+        y3_after > y3_before,
+        "block 3 should shift down when block 2 moves: {} -> {}",
+        y3_before,
+        y3_after
+    );
+}

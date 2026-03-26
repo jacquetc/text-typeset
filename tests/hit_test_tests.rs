@@ -565,6 +565,55 @@ fn hit_test_between_blocks_below_content() {
 }
 
 #[test]
+fn hit_test_link_region_detected() {
+    let mut ts = setup();
+    // Create a block where the text is marked as a link
+    let block = BlockLayoutParams {
+        block_id: 1,
+        position: 0,
+        text: "Click here".to_string(),
+        fragments: vec![FragmentParams {
+            text: "Click here".to_string(),
+            offset: 0,
+            length: 10,
+            font_family: None,
+            font_weight: None,
+            font_bold: None,
+            font_italic: None,
+            font_point_size: None,
+            underline: true,
+            overline: false,
+            strikeout: false,
+            is_link: true,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+        }],
+        alignment: Alignment::Left,
+        top_margin: 0.0,
+        bottom_margin: 0.0,
+        left_margin: 0.0,
+        right_margin: 0.0,
+        text_indent: 0.0,
+        list_marker: String::new(),
+        list_indent: 0.0,
+        tab_positions: vec![],
+        line_height_multiplier: None,
+        non_breakable_lines: false,
+        checkbox: None,
+        background_color: None,
+    };
+    ts.layout_blocks(vec![block]);
+
+    // Hit test on the link text
+    let result = ts.hit_test(30.0, 10.0);
+    assert!(result.is_some());
+    match result.unwrap().region {
+        HitRegion::Link { .. } => {} // expected
+        other => panic!("expected Link region, got {:?}", std::mem::discriminant(&other)),
+    }
+}
+
+#[test]
 fn caret_rect_on_second_line() {
     let mut ts = setup();
     ts.layout_blocks(vec![make_block(
