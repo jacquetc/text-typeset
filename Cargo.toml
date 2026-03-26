@@ -25,7 +25,7 @@ unicode-linebreak = "0.1"
 unicode-bidi = "0.3"
 anyhow = "1.0"
 thiserror = "2.0"
-text-document = { path = "../text-document/crates/public_api", optional = true, version = "0.0.15" }
+text-document = { path = "../text-document/crates/public_api", optional = true, version = "0.0.16" }
 
 [dev-dependencies]
 text-document = { path = "../text-document/crates/public_api" }
