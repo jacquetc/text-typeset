@@ -53,8 +53,8 @@ pub fn break_into_lines(
     // Get break opportunities from unicode-linebreak (byte offsets in text)
     let breaks: Vec<(usize, BreakOpportunity)> = linebreaks(text).collect();
 
-    // Build a set of allowed break positions (glyph indices)
-    let break_points: HashSet<usize> = map_breaks_to_glyph_indices(&flat, &breaks);
+    // Build sets of allowed and mandatory break positions (glyph indices)
+    let (break_points, mandatory_breaks) = map_breaks_to_glyph_indices(&flat, &breaks);
 
     // Greedy line wrapping
     let mut lines = Vec::new();
@@ -73,8 +73,8 @@ pub fn break_into_lines(
             last_break_glyph = Some(i + 1);
         }
 
-        // Check for mandatory break
-        let is_mandatory = break_points_mandatory(&breaks, &flat, i + 1);
+        // Check for mandatory break — O(1) HashSet lookup
+        let is_mandatory = mandatory_breaks.contains(&(i + 1));
 
         let exceeds_width = line_width > effective_width && line_start_glyph < i;
 
@@ -202,46 +202,38 @@ fn flatten_runs(runs: &[ShapedRun]) -> Vec<FlatGlyph> {
     flat
 }
 
-/// Map unicode-linebreak byte offsets to glyph indices.
-/// A break at byte offset B maps to the glyph whose cluster >= B.
+/// Map unicode-linebreak byte offsets to glyph indices using a merged walk.
+/// Both `flat` (by cluster) and `breaks` (by byte offset) are sorted,
+/// so a single O(b + m) pass replaces the previous O(b × m) approach.
+///
+/// Returns (break_points: HashSet<glyph_idx>, mandatory_breaks: HashSet<glyph_idx>).
 fn map_breaks_to_glyph_indices(
     flat: &[FlatGlyph],
     breaks: &[(usize, BreakOpportunity)],
-) -> HashSet<usize> {
-    let mut result = HashSet::new();
-    for &(byte_offset, _opportunity) in breaks {
-        // Find the first glyph whose cluster starts at or after byte_offset
-        if let Some(glyph_idx) = flat.iter().position(|g| g.cluster as usize >= byte_offset) {
-            result.insert(glyph_idx);
+) -> (HashSet<usize>, HashSet<usize>) {
+    let mut break_points = HashSet::new();
+    let mut mandatory_breaks = HashSet::new();
+    let mut glyph_cursor = 0usize;
+
+    for &(byte_offset, opportunity) in breaks {
+        // Advance glyph cursor to the first glyph whose cluster >= byte_offset
+        while glyph_cursor < flat.len()
+            && (flat[glyph_cursor].cluster as usize) < byte_offset
+        {
+            glyph_cursor += 1;
+        }
+        let glyph_idx = if glyph_cursor < flat.len() {
+            glyph_cursor
         } else {
-            // Break is at or past end of text
-            result.insert(flat.len());
+            flat.len()
+        };
+        break_points.insert(glyph_idx);
+        if opportunity == BreakOpportunity::Mandatory {
+            mandatory_breaks.insert(glyph_idx);
         }
     }
-    result
-}
 
-/// Check if glyph index `glyph_idx` corresponds to a mandatory break.
-fn break_points_mandatory(
-    breaks: &[(usize, BreakOpportunity)],
-    flat: &[FlatGlyph],
-    glyph_idx: usize,
-) -> bool {
-    if glyph_idx == 0 || glyph_idx > flat.len() {
-        return false;
-    }
-
-    // Find the byte offset for this glyph boundary
-    let byte_offset = if glyph_idx < flat.len() {
-        flat[glyph_idx].cluster as usize
-    } else {
-        // Past last glyph -check if there's a mandatory break at the end
-        return false;
-    };
-
-    breaks
-        .iter()
-        .any(|&(bo, op)| bo == byte_offset && op == BreakOpportunity::Mandatory)
+    (break_points, mandatory_breaks)
 }
 
 /// Build a LayoutLine from a glyph range within the flat sequence.
