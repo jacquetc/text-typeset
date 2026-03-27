@@ -513,6 +513,11 @@ fn hit_test_above_all_content_returns_first_block() {
         "hit test above all content should return the first block, not the last (got block {})",
         hit.block_id
     );
+    assert_eq!(
+        hit.position, 0,
+        "hit test above all content should return start of first block (pos 0), got {}",
+        hit.position
+    );
 }
 
 #[test]

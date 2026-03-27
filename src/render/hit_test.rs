@@ -106,7 +106,19 @@ fn hit_test_block(
     let line = match find_line_at_y(&block.lines, local_y) {
         Some(l) => l,
         None => {
-            // Below all lines in the block
+            // Above all lines: return start of first line
+            if let Some(first_line) = block.lines.first()
+                && local_y < first_line.y - first_line.ascent
+            {
+                return Some(HitTestResult {
+                    position: block.position + first_line.char_range.start,
+                    block_id,
+                    offset_in_block: first_line.char_range.start,
+                    region: HitRegion::BelowContent,
+                    tooltip: None,
+                });
+            }
+            // Below all lines: return end of last line
             if let Some(last_line) = block.lines.last() {
                 return Some(HitTestResult {
                     position: block.position + last_line.char_range.end,
@@ -443,8 +455,10 @@ fn find_block_at_y(flow: &FlowLayout, doc_y: f32) -> Option<(usize, &BlockLayout
         }
     }
 
-    // Above all blocks: return the first one
-    if doc_y < 0.0 {
+    // Determine whether doc_y is above or below all content by comparing
+    // against the first item's y. idx==0 means no item has y <= doc_y.
+    if idx == 0 {
+        // Above all blocks: return the first one
         for item in &flow.flow_order {
             if let FlowItem::Block { block_id, .. } = item
                 && let Some(block) = flow.blocks.get(block_id)
