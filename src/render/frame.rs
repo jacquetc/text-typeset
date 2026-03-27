@@ -61,6 +61,10 @@ pub fn build_render_frame(
                     continue;
                 }
                 if let Some(table) = flow.tables.get(table_id) {
+                    // Capture table content glyphs/images so rebuild_flat_frame
+                    // can reconstruct them (keyed by table_id).
+                    let g_start = render_frame.glyphs.len();
+                    let i_start = render_frame.images.len();
                     render_table_cells(
                         table,
                         0.0,
@@ -73,6 +77,11 @@ pub fn build_render_frame(
                         viewport_height,
                         render_frame,
                     );
+                    let table_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
+                    let table_i: Vec<ImageQuad> = render_frame.images[i_start..].to_vec();
+                    render_frame.block_glyphs.push((*table_id, table_g));
+                    render_frame.block_images.push((*table_id, table_i));
+
                     let decos = generate_table_decorations(table, scroll_offset);
                     render_frame.decorations.extend(decos);
                 }
@@ -87,6 +96,10 @@ pub fn build_render_frame(
                     continue;
                 }
                 if let Some(frame_layout) = flow.frames.get(frame_id) {
+                    // Capture frame content glyphs/images so rebuild_flat_frame
+                    // can reconstruct them (keyed by frame_id).
+                    let g_start = render_frame.glyphs.len();
+                    let i_start = render_frame.images.len();
                     render_frame_layout(
                         frame_layout,
                         registry,
@@ -97,6 +110,10 @@ pub fn build_render_frame(
                         viewport_height,
                         render_frame,
                     );
+                    let frame_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
+                    let frame_i: Vec<ImageQuad> = render_frame.images[i_start..].to_vec();
+                    render_frame.block_glyphs.push((*frame_id, frame_g));
+                    render_frame.block_images.push((*frame_id, frame_i));
                 }
                 continue;
             }

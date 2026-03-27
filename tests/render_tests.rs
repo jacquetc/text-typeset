@@ -2029,6 +2029,78 @@ fn render_block_only_preserves_frame_decorations() {
 }
 
 #[test]
+fn render_block_only_preserves_frame_glyphs() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block(1, "First block")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::Full,
+        blocks: vec![make_block(2, "Frame content")],
+        tables: vec![],
+        frames: vec![],
+    });
+
+    // Full render: count frame content glyphs
+    let frame = ts.render();
+    let glyph_count_full = frame.glyphs.len();
+    assert!(
+        glyph_count_full > 0,
+        "full render should produce glyphs for both top-level block and frame content"
+    );
+
+    // render_block_only should preserve frame content glyphs
+    let frame = ts.render_block_only(1);
+    assert_eq!(
+        frame.glyphs.len(),
+        glyph_count_full,
+        "render_block_only should preserve frame content glyphs, got {} vs full {}",
+        frame.glyphs.len(),
+        glyph_count_full
+    );
+}
+
+#[test]
+fn render_block_only_preserves_table_glyphs() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block(1, "First block")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![CellLayoutParams {
+            row: 0,
+            column: 0,
+            blocks: vec![make_block(100, "Cell text")],
+            background_color: None,
+        }],
+    });
+
+    let frame = ts.render();
+    let glyph_count_full = frame.glyphs.len();
+    assert!(glyph_count_full > 0);
+
+    let frame = ts.render_block_only(1);
+    assert_eq!(
+        frame.glyphs.len(),
+        glyph_count_full,
+        "render_block_only should preserve table cell glyphs"
+    );
+}
+
+#[test]
 fn nested_frame_renders_inner_content() {
     let mut ts = setup();
     ts.layout_blocks(vec![]);
