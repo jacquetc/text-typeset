@@ -1,4 +1,4 @@
-use crate::layout::flow::FlowLayout;
+use crate::layout::flow::{FlowItem, FlowLayout};
 use crate::render::hit_test::caret_rect;
 use crate::types::{CursorDisplay, DecorationKind, DecorationRect};
 
@@ -51,8 +51,27 @@ fn compute_selection_rects(
 ) -> Vec<DecorationRect> {
     let mut rects = Vec::new();
     let viewport_width = flow.viewport_width;
+    let view_top = scroll_offset;
+    let view_bottom = scroll_offset + flow.viewport_height;
 
-    for block in flow.blocks.values() {
+    for item in &flow.flow_order {
+        let block_id = match item {
+            FlowItem::Block { block_id, y, height } => {
+                // Viewport culling
+                if *y + *height < view_top {
+                    continue;
+                }
+                if *y > view_bottom {
+                    break;
+                }
+                *block_id
+            }
+            _ => continue,
+        };
+        let block = match flow.blocks.get(&block_id) {
+            Some(b) => b,
+            None => continue,
+        };
         let block_start = block.position;
 
         for line in &block.lines {

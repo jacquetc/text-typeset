@@ -202,6 +202,14 @@ impl Typesetter {
         self.flow_layout.content_height
     }
 
+    /// Maximum content width across all laid-out lines, in pixels.
+    ///
+    /// Use for horizontal scrollbar range when text wrapping is disabled.
+    /// Returns 0.0 if no blocks have been laid out.
+    pub fn max_content_width(&self) -> f32 {
+        self.flow_layout.cached_max_content_width
+    }
+
     // ── Layout ──────────────────────────────────────────────────
 
     /// Full layout from a text-document `FlowSnapshot`.
@@ -320,6 +328,144 @@ impl Typesetter {
             &mut self.render_frame,
         );
         &self.render_frame
+    }
+
+    /// Incremental render that only re-renders one block's glyphs.
+    ///
+    /// Reuses cached glyph/decoration data for all other blocks from the
+    /// last full `render()`. Use after `relayout_block()` when only one
+    /// block's text changed.
+    pub fn render_block_only(&mut self, block_id: usize) -> &RenderFrame {
+        // Re-render just this block's glyphs into a temporary frame
+        let mut new_glyphs = Vec::new();
+        let mut new_images = Vec::new();
+        if let Some(block) = self.flow_layout.blocks.get(&block_id) {
+            let mut tmp = crate::types::RenderFrame::new();
+            crate::render::frame::render_block_at_offset(
+                block,
+                0.0,
+                0.0,
+                &self.font_registry,
+                &mut self.atlas,
+                &mut self.glyph_cache,
+                &mut self.scale_context,
+                self.scroll_offset,
+                self.viewport_height,
+                &mut tmp,
+            );
+            new_glyphs = tmp.glyphs;
+            new_images = tmp.images;
+        }
+
+        // Re-generate this block's decorations
+        let new_decos = if let Some(block) = self.flow_layout.blocks.get(&block_id) {
+            crate::render::decoration::generate_block_decorations(
+                block,
+                &self.font_registry,
+                self.scroll_offset,
+                self.viewport_height,
+                0.0,
+                0.0,
+                self.flow_layout.viewport_width,
+            )
+        } else {
+            Vec::new()
+        };
+
+        // Replace this block's entry in the per-block caches
+        if let Some(entry) = self
+            .render_frame
+            .block_glyphs
+            .iter_mut()
+            .find(|(id, _)| *id == block_id)
+        {
+            entry.1 = new_glyphs;
+        }
+        if let Some(entry) = self
+            .render_frame
+            .block_images
+            .iter_mut()
+            .find(|(id, _)| *id == block_id)
+        {
+            entry.1 = new_images;
+        }
+        if let Some(entry) = self
+            .render_frame
+            .block_decorations
+            .iter_mut()
+            .find(|(id, _)| *id == block_id)
+        {
+            entry.1 = new_decos;
+        }
+
+        // Rebuild flat vecs from per-block cache + cursor decorations
+        self.rebuild_flat_frame();
+
+        &self.render_frame
+    }
+
+    /// Lightweight render that only updates cursor/selection decorations.
+    ///
+    /// Reuses the existing glyph quads and images from the last full `render()`.
+    /// Use this when only the cursor blinked or selection changed, not the text.
+    pub fn render_cursor_only(&mut self) -> &RenderFrame {
+        // Remove old cursor/selection decorations, keep block decorations
+        self.render_frame.decorations.retain(|d| {
+            !matches!(
+                d.kind,
+                crate::types::DecorationKind::Cursor | crate::types::DecorationKind::Selection
+            )
+        });
+
+        // Regenerate cursor/selection decorations
+        let cursor_decos = crate::render::cursor::generate_cursor_decorations(
+            &self.flow_layout,
+            &self.cursors,
+            self.scroll_offset,
+            self.cursor_color,
+            self.selection_color,
+        );
+        self.render_frame.decorations.extend(cursor_decos);
+
+        &self.render_frame
+    }
+
+    /// Rebuild flat glyphs/images/decorations from per-block caches + cursor decorations.
+    fn rebuild_flat_frame(&mut self) {
+        self.render_frame.glyphs.clear();
+        self.render_frame.images.clear();
+        self.render_frame.decorations.clear();
+        for (_, glyphs) in &self.render_frame.block_glyphs {
+            self.render_frame.glyphs.extend_from_slice(glyphs);
+        }
+        for (_, images) in &self.render_frame.block_images {
+            self.render_frame.images.extend_from_slice(images);
+        }
+        for (_, decos) in &self.render_frame.block_decorations {
+            self.render_frame.decorations.extend_from_slice(decos);
+        }
+        let cursor_decos = crate::render::cursor::generate_cursor_decorations(
+            &self.flow_layout,
+            &self.cursors,
+            self.scroll_offset,
+            self.cursor_color,
+            self.selection_color,
+        );
+        self.render_frame.decorations.extend(cursor_decos);
+
+        // Update atlas metadata
+        self.render_frame.atlas_dirty = self.atlas.dirty;
+        self.render_frame.atlas_width = self.atlas.width;
+        self.render_frame.atlas_height = self.atlas.height;
+        if self.atlas.dirty {
+            let pixels = &self.atlas.pixels;
+            let needed = (self.atlas.width * self.atlas.height * 4) as usize;
+            self.render_frame.atlas_pixels.resize(needed, 0);
+            let copy_len = needed.min(pixels.len());
+            self.render_frame.atlas_pixels[..copy_len]
+                .copy_from_slice(&pixels[..copy_len]);
+            self.atlas.dirty = false;
+        }
     }
 
     // ── Hit testing ─────────────────────────────────────────────

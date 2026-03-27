@@ -35,12 +35,19 @@ pub struct RenderFrame {
     /// Decoration rectangles: selections, cursor, underlines, strikeouts,
     /// overlines, backgrounds, table borders, and cell backgrounds.
     pub decorations: Vec<DecorationRect>,
+    /// Per-block glyph data for incremental updates. Keyed by block_id.
+    pub(crate) block_glyphs: Vec<(usize, Vec<GlyphQuad>)>,
+    /// Per-block decoration data (underlines, etc. — NOT cursor/selection).
+    pub(crate) block_decorations: Vec<(usize, Vec<DecorationRect>)>,
+    /// Per-block image data for incremental updates.
+    pub(crate) block_images: Vec<(usize, Vec<ImageQuad>)>,
 }
 
 /// A positioned glyph to draw as a textured quad from the atlas.
 ///
 /// The adapter draws the rectangle at `screen` position, sampling from
 /// the `atlas` rectangle in the atlas texture, tinted with `color`.
+#[derive(Clone)]
 pub struct GlyphQuad {
     /// Screen position and size: `[x, y, width, height]` in pixels.
     pub screen: [f32; 4],
@@ -57,6 +64,7 @@ pub struct GlyphQuad {
 /// text-typeset computes the position and size but does NOT load or rasterize
 /// the image. The adapter retrieves the image data (e.g., from
 /// `TextDocument::resource(name)`) and draws it as a separate texture.
+#[derive(Clone)]
 pub struct ImageQuad {
     /// Screen position and size: `[x, y, width, height]` in pixels.
     pub screen: [f32; 4],
@@ -65,6 +73,7 @@ pub struct ImageQuad {
 }
 
 /// A colored rectangle for decorations (underlines, selections, borders, etc.).
+#[derive(Clone)]
 pub struct DecorationRect {
     /// Screen position and size: `[x, y, width, height]` in pixels.
     pub rect: [f32; 4],
@@ -176,6 +185,9 @@ impl RenderFrame {
             glyphs: Vec::new(),
             images: Vec::new(),
             decorations: Vec::new(),
+            block_glyphs: Vec::new(),
+            block_decorations: Vec::new(),
+            block_images: Vec::new(),
         }
     }
 }

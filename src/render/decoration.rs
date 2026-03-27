@@ -10,6 +10,7 @@ pub fn generate_block_decorations(
     block: &BlockLayout,
     registry: &FontRegistry,
     scroll_offset: f32,
+    viewport_height: f32,
     x_offset: f32,
     y_offset: f32,
     available_width: f32,
@@ -29,6 +30,14 @@ pub fn generate_block_decorations(
 
     for line in &block.lines {
         let line_y = y_offset + block.y + line.y; // baseline in document space
+        let screen_top = line_y - line.ascent - scroll_offset;
+        // Line-level viewport culling
+        if screen_top + line.line_height < 0.0 {
+            continue;
+        }
+        if screen_top > viewport_height {
+            break;
+        }
         let screen_baseline = line_y - scroll_offset;
 
         for positioned_run in &line.runs {

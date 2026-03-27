@@ -42,6 +42,7 @@ pub struct CachedGlyph {
 pub struct GlyphCache {
     pub(crate) entries: HashMap<GlyphCacheKey, CachedGlyph>,
     generation: u64,
+    last_eviction_generation: u64,
 }
 
 /// Number of frames a glyph can go unused before being evicted.
@@ -58,6 +59,7 @@ impl GlyphCache {
         Self {
             entries: HashMap::new(),
             generation: 0,
+            last_eviction_generation: 0,
         }
     }
 
@@ -92,7 +94,15 @@ impl GlyphCache {
 
     /// Evict glyphs unused for MAX_IDLE_FRAMES generations.
     /// Returns the AllocIds that should be deallocated from the atlas.
+    /// Only runs the actual eviction scan every 60 calls (~1 second at 60fps)
+    /// to avoid iterating the entire cache on every render.
     pub fn evict_unused(&mut self) -> Vec<AllocId> {
+        // Only scan every 60 generations (~1 second at 60fps)
+        if self.generation - self.last_eviction_generation < 60 {
+            return Vec::new();
+        }
+        self.last_eviction_generation = self.generation;
+
         let threshold = self.generation.saturating_sub(MAX_IDLE_FRAMES);
         let mut evicted = Vec::new();
 

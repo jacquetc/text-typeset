@@ -109,22 +109,39 @@ use crate::layout::block::BlockLayout;
 use crate::layout::line::LayoutLine;
 
 fn find_block_at_y(flow: &FlowLayout, doc_y: f32) -> Option<(usize, &BlockLayout)> {
-    for item in &flow.flow_order {
-        let (bid, item_y, item_h) = match item {
-            FlowItem::Block {
-                block_id,
-                y,
-                height,
-            } => (*block_id, *y, *height),
-            _ => continue,
+    if flow.flow_order.is_empty() {
+        return None;
+    }
+
+    // Binary search: find the last item whose y <= doc_y
+    let idx = flow.flow_order.partition_point(|item| {
+        let y = match item {
+            FlowItem::Block { y, .. } | FlowItem::Table { y, .. } | FlowItem::Frame { y, .. } => {
+                *y
+            }
         };
-        if doc_y >= item_y
-            && doc_y < item_y + item_h
-            && let Some(block) = flow.blocks.get(&bid)
+        y <= doc_y
+    });
+
+    // Check the item at idx-1 (the last one with y <= doc_y) and nearby items
+    let start = idx.saturating_sub(1);
+    let end = (idx + 1).min(flow.flow_order.len());
+    for i in start..end {
+        if let FlowItem::Block {
+            block_id,
+            y,
+            height,
+        } = &flow.flow_order[i]
         {
-            return Some((bid, block));
+            if doc_y >= *y
+                && doc_y < *y + *height
+                && let Some(block) = flow.blocks.get(block_id)
+            {
+                return Some((*block_id, block));
+            }
         }
     }
+
     // If below all blocks, return the last one
     for item in flow.flow_order.iter().rev() {
         if let FlowItem::Block { block_id, .. } = item

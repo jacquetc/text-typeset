@@ -31,6 +31,7 @@ pub struct FlowLayout {
     pub content_height: f32,
     pub viewport_width: f32,
     pub viewport_height: f32,
+    pub cached_max_content_width: f32,
 }
 
 impl Default for FlowLayout {
@@ -49,6 +50,7 @@ impl FlowLayout {
             content_height: 0.0,
             viewport_width: 0.0,
             viewport_height: 0.0,
+            cached_max_content_width: 0.0,
         }
     }
 
@@ -70,6 +72,9 @@ impl FlowLayout {
             y: table.y,
             height: table.total_height,
         });
+        if table.total_width > self.cached_max_content_width {
+            self.cached_max_content_width = table.total_width;
+        }
         self.tables.insert(table.table_id, table);
         self.content_height = y;
     }
@@ -126,6 +131,9 @@ impl FlowLayout {
             y: frame.y,
             height: frame.total_height,
         });
+        if frame.total_width > self.cached_max_content_width {
+            self.cached_max_content_width = frame.total_width;
+        }
         self.frames.insert(frame.frame_id, frame);
     }
 
@@ -136,6 +144,7 @@ impl FlowLayout {
         self.frames.clear();
         self.flow_order.clear();
         self.content_height = 0.0;
+        self.cached_max_content_width = 0.0;
     }
 
     /// Add a single block to the flow at the current y position.
@@ -173,6 +182,7 @@ impl FlowLayout {
             y: block.y,
             height: block.height,
         });
+        self.update_max_width_for_block(&block);
         self.blocks.insert(block.block_id, block);
         self.content_height = y;
     }
@@ -239,6 +249,7 @@ impl FlowLayout {
 
         let new_y = block.y;
         let new_height = block.height;
+        self.update_max_width_for_block(&block);
         self.blocks.insert(block_id, block);
 
         // Update flow_order entry
@@ -299,6 +310,29 @@ impl FlowLayout {
                 }
             }
             self.content_height += delta;
+        }
+    }
+
+    /// Update the cached max content width considering a single block's lines.
+    fn update_max_width_for_block(&mut self, block: &BlockLayout) {
+        for line in &block.lines {
+            let w = line.width + block.left_margin + block.right_margin;
+            if w > self.cached_max_content_width {
+                self.cached_max_content_width = w;
+            }
+        }
+    }
+
+    /// Recompute max content width from scratch (all blocks).
+    fn recompute_max_content_width(&mut self) {
+        self.cached_max_content_width = 0.0;
+        for block in self.blocks.values() {
+            for line in &block.lines {
+                let w = line.width + block.left_margin + block.right_margin;
+                if w > self.cached_max_content_width {
+                    self.cached_max_content_width = w;
+                }
+            }
         }
     }
 

@@ -7,7 +7,7 @@ use crate::layout::flow::{FlowItem, FlowLayout};
 use crate::layout::table::generate_table_decorations;
 use crate::render::cursor::generate_cursor_decorations;
 use crate::render::decoration::generate_block_decorations;
-use crate::types::{CursorDisplay, GlyphQuad, RenderFrame};
+use crate::types::{CursorDisplay, GlyphQuad, ImageQuad, RenderFrame};
 
 /// Build a RenderFrame from the current flow layout.
 ///
@@ -30,6 +30,9 @@ pub fn build_render_frame(
     render_frame.glyphs.clear();
     render_frame.images.clear();
     render_frame.decorations.clear();
+    render_frame.block_glyphs.clear();
+    render_frame.block_decorations.clear();
+    render_frame.block_images.clear();
 
     // Advance generation and evict stale glyphs
     cache.advance_generation();
@@ -66,6 +69,7 @@ pub fn build_render_frame(
                         cache,
                         scale_context,
                         scroll_offset,
+                        viewport_height,
                         render_frame,
                     );
                     let decos = generate_table_decorations(table, scroll_offset);
@@ -89,6 +93,7 @@ pub fn build_render_frame(
                         cache,
                         scale_context,
                         scroll_offset,
+                        viewport_height,
                         render_frame,
                     );
                 }
@@ -102,6 +107,9 @@ pub fn build_render_frame(
         }
 
         if let Some(block) = flow.blocks.get(&block_id) {
+            // Capture per-block glyphs and images
+            let g_start = render_frame.glyphs.len();
+            let i_start = render_frame.images.len();
             render_block_at_offset(
                 block,
                 0.0,
@@ -111,17 +119,24 @@ pub fn build_render_frame(
                 cache,
                 scale_context,
                 scroll_offset,
+                viewport_height,
                 render_frame,
             );
-            // Generate decorations (underline, strikeout, overline)
+            let block_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
+            let block_i: Vec<ImageQuad> = render_frame.images[i_start..].to_vec();
+            render_frame.block_glyphs.push((block_id, block_g));
+            render_frame.block_images.push((block_id, block_i));
+
             let decos = generate_block_decorations(
                 block,
                 registry,
                 scroll_offset,
+                viewport_height,
                 0.0,
                 0.0,
                 flow.viewport_width,
             );
+            render_frame.block_decorations.push((block_id, decos.clone()));
             render_frame.decorations.extend(decos);
         }
     }
@@ -147,7 +162,7 @@ pub fn build_render_frame(
 /// Handles list markers and all lines. The offset is (0, 0) for top-level
 /// blocks, and non-zero for blocks inside table cells or frames.
 #[allow(clippy::too_many_arguments)]
-fn render_block_at_offset(
+pub(crate) fn render_block_at_offset(
     block: &BlockLayout,
     offset_x: f32,
     offset_y: f32,
@@ -156,6 +171,7 @@ fn render_block_at_offset(
     cache: &mut GlyphCache,
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
+    viewport_height: f32,
     render_frame: &mut RenderFrame,
 ) {
     // Render list marker on the first line (if present)
@@ -163,21 +179,32 @@ fn render_block_at_offset(
         && let Some(first_line) = block.lines.first()
     {
         let baseline_y = offset_y + block.y + first_line.y;
-        render_run_glyphs(
-            &marker.run,
-            offset_x + marker.x,
-            baseline_y,
-            registry,
-            atlas,
-            cache,
-            scale_context,
-            scroll_offset,
-            render_frame,
-        );
+        let screen_top = baseline_y - first_line.ascent - scroll_offset;
+        if screen_top + first_line.line_height >= 0.0 && screen_top <= viewport_height {
+            render_run_glyphs(
+                &marker.run,
+                offset_x + marker.x,
+                baseline_y,
+                registry,
+                atlas,
+                cache,
+                scale_context,
+                scroll_offset,
+                render_frame,
+            );
+        }
     }
 
     for line in &block.lines {
         let line_y = offset_y + block.y + line.y;
+        // Line-level viewport culling
+        let screen_top = line_y - line.ascent - scroll_offset;
+        if screen_top + line.line_height < 0.0 {
+            continue; // above viewport
+        }
+        if screen_top > viewport_height {
+            break; // below viewport, and lines are ordered top-to-bottom
+        }
 
         for positioned_run in &line.runs {
             let pen_x = offset_x + block.left_margin + positioned_run.x;
@@ -210,6 +237,7 @@ fn render_table_cells(
     cache: &mut GlyphCache,
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
+    viewport_height: f32,
     render_frame: &mut RenderFrame,
 ) {
     for cell in &table.cell_layouts {
@@ -229,6 +257,7 @@ fn render_table_cells(
                 cache,
                 scale_context,
                 scroll_offset,
+                viewport_height,
                 render_frame,
             );
             let cell_w = table
@@ -237,7 +266,7 @@ fn render_table_cells(
                 .copied()
                 .unwrap_or(200.0);
             let decos =
-                generate_block_decorations(block, registry, scroll_offset, cell_x, cell_y, cell_w);
+                generate_block_decorations(block, registry, scroll_offset, viewport_height, cell_x, cell_y, cell_w);
             render_frame.decorations.extend(decos);
         }
     }
@@ -250,6 +279,7 @@ fn render_frame_layout(
     cache: &mut GlyphCache,
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
+    viewport_height: f32,
     render_frame: &mut RenderFrame,
 ) {
     let offset_x = frame.x + frame.content_x;
@@ -266,12 +296,14 @@ fn render_frame_layout(
             cache,
             scale_context,
             scroll_offset,
+            viewport_height,
             render_frame,
         );
         let decos = generate_block_decorations(
             block,
             registry,
             scroll_offset,
+            viewport_height,
             offset_x,
             offset_y,
             frame.content_width,
@@ -290,6 +322,7 @@ fn render_frame_layout(
             cache,
             scale_context,
             scroll_offset,
+            viewport_height,
             render_frame,
         );
     }
