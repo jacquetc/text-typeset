@@ -96,6 +96,12 @@ pub struct FragmentParams {
     pub tooltip: Option<String>,
     /// Vertical alignment (normal, superscript, subscript).
     pub vertical_alignment: crate::types::VerticalAlignment,
+    /// If Some, this fragment represents an inline image placeholder.
+    pub image_name: Option<String>,
+    /// Image width in pixels. Only meaningful when image_name is Some.
+    pub image_width: f32,
+    /// Image height in pixels. Only meaningful when image_name is Some.
+    pub image_height: f32,
 }
 
 /// Lay out a single block: resolve fonts, shape fragments, break into lines.
@@ -112,6 +118,41 @@ pub fn layout_block(
     let mut default_metrics: Option<FontMetricsPx> = None;
 
     for frag in &params.fragments {
+        // Inline image: create a synthetic run with one placeholder glyph
+        if let Some(ref image_name) = frag.image_name {
+            use crate::shaping::run::{ShapedGlyph, ShapedRun};
+            let image_glyph = ShapedGlyph {
+                glyph_id: 0,
+                cluster: 0,
+                x_advance: frag.image_width,
+                y_advance: 0.0,
+                x_offset: 0.0,
+                y_offset: 0.0,
+                font_face_id: crate::types::FontFaceId(0),
+            };
+            let run = ShapedRun {
+                font_face_id: crate::types::FontFaceId(0),
+                size_px: 0.0,
+                glyphs: vec![image_glyph],
+                advance_width: frag.image_width,
+                text_range: frag.offset..frag.offset + frag.text.len(),
+                underline_style: frag.underline_style,
+                overline: false,
+                strikeout: false,
+                is_link: frag.is_link,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: frag.anchor_href.clone(),
+                tooltip: frag.tooltip.clone(),
+                vertical_alignment: crate::types::VerticalAlignment::Normal,
+                image_name: Some(image_name.clone()),
+                image_height: frag.image_height,
+            };
+            shaped_runs.push(run);
+            continue;
+        }
+
         // Scale font size for superscript/subscript
         let font_point_size = match frag.vertical_alignment {
             crate::types::VerticalAlignment::SuperScript

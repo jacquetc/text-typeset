@@ -179,6 +179,8 @@ pub fn shape_text_directed(
         anchor_href: None,
         tooltip: None,
         vertical_alignment: crate::types::VerticalAlignment::Normal,
+        image_name: None,
+        image_height: 0.0,
     })
 }
 
@@ -245,6 +247,8 @@ pub fn shape_text_with_buffer(
         anchor_href: None,
         tooltip: None,
         vertical_alignment: crate::types::VerticalAlignment::Normal,
+        image_name: None,
+        image_height: 0.0,
     };
 
     // Reclaim the buffer for reuse

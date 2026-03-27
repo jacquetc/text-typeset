@@ -358,12 +358,19 @@ fn build_line(
     let char_start = byte_offset_to_char_offset(text, byte_start);
     let char_end = byte_offset_to_char_offset(text, byte_end);
 
-    let line_height = metrics.ascent + metrics.descent + metrics.leading;
+    // Expand line height for inline images taller than the font ascent
+    let mut ascent = metrics.ascent;
+    for run in &positioned_runs {
+        if run.shaped_run.image_name.is_some() && run.shaped_run.image_height > ascent {
+            ascent = run.shaped_run.image_height;
+        }
+    }
+    let line_height = ascent + metrics.descent + metrics.leading;
 
     LayoutLine {
         runs: positioned_runs,
         y: 0.0, // will be set by the caller (block layout)
-        ascent: metrics.ascent,
+        ascent,
         descent: metrics.descent,
         leading: metrics.leading,
         width,
@@ -409,6 +416,8 @@ fn extract_sub_run(
         anchor_href: run.anchor_href.clone(),
         tooltip: run.tooltip.clone(),
         vertical_alignment: run.vertical_alignment,
+        image_name: run.image_name.clone(),
+        image_height: run.image_height,
     };
     Some((sub_run, advance))
 }

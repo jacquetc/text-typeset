@@ -378,6 +378,25 @@ fn find_line_at_y(lines: &[LayoutLine], local_y: f32) -> Option<&LayoutLine> {
 
 fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion, Option<String>) {
     for run in &line.runs {
+        // Inline image hit detection
+        if let Some(ref name) = run.shaped_run.image_name {
+            let img_end = run.x + run.shaped_run.advance_width;
+            if local_x < img_end {
+                let offset = run
+                    .shaped_run
+                    .glyphs
+                    .first()
+                    .map(|g| g.cluster as usize)
+                    .unwrap_or(line.char_range.start);
+                return (
+                    offset,
+                    HitRegion::Image { name: name.clone() },
+                    run.decorations.tooltip.clone(),
+                );
+            }
+            continue;
+        }
+
         let mut glyph_x = run.x;
 
         for glyph in &run.shaped_run.glyphs {

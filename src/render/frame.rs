@@ -214,6 +214,19 @@ pub(crate) fn render_block_at_offset(
 
         for positioned_run in &line.runs {
             let pen_x = offset_x + block.left_margin + positioned_run.x;
+
+            // Inline image: emit ImageQuad instead of rasterizing glyphs
+            if let Some(ref image_name) = positioned_run.shaped_run.image_name {
+                let image_w = positioned_run.shaped_run.advance_width;
+                let image_h = positioned_run.shaped_run.image_height;
+                let image_y = line_y - image_h - scroll_offset;
+                render_frame.images.push(crate::types::ImageQuad {
+                    screen: [pen_x, image_y, image_w, image_h],
+                    name: image_name.clone(),
+                });
+                continue;
+            }
+
             // Adjust baseline for superscript/subscript
             let baseline_offset = match positioned_run.decorations.vertical_alignment {
                 crate::types::VerticalAlignment::SuperScript => {

@@ -39,4 +39,8 @@ pub struct ShapedRun {
     pub tooltip: Option<String>,
     /// Vertical alignment (normal, superscript, subscript).
     pub vertical_alignment: crate::types::VerticalAlignment,
+    /// If Some, this run represents an inline image placeholder.
+    pub image_name: Option<String>,
+    /// Image height in pixels (used for line height expansion).
+    pub image_height: f32,
 }

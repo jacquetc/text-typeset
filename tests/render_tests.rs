@@ -40,6 +40,9 @@ fn make_block(id: usize, text: &str) -> BlockLayoutParams {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -225,6 +228,9 @@ fn relayout_block_updates_render() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -310,6 +316,9 @@ fn multi_fragment_block_renders_all_glyphs() {
                 anchor_href: None,
                 tooltip: None,
                 vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
             },
             FragmentParams {
                 text: "world".to_string(),
@@ -332,6 +341,9 @@ fn multi_fragment_block_renders_all_glyphs() {
                 anchor_href: None,
                 tooltip: None,
                 vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
             },
         ],
         alignment: Alignment::Left,
@@ -421,6 +433,9 @@ fn underline_produces_decoration_rect() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -483,6 +498,9 @@ fn strikeout_produces_decoration_rect() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -566,6 +584,9 @@ fn letter_spacing_increases_total_width() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -632,6 +653,9 @@ fn word_spacing_increases_gap_between_words() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -734,6 +758,9 @@ fn list_marker_renders_extra_glyphs() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -789,6 +816,9 @@ fn list_marker_positioned_left_of_content() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -862,6 +892,9 @@ fn list_indent_shifts_content_right() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -929,6 +962,9 @@ fn make_cell(row: usize, col: usize, text: &str) -> CellLayoutParams {
                 anchor_href: None,
                 tooltip: None,
                 vertical_alignment: VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
             }],
             alignment: Alignment::Left,
             top_margin: 0.0,
@@ -1195,6 +1231,9 @@ fn make_frame_block(text: &str) -> BlockLayoutParams {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -1449,6 +1488,9 @@ fn underline_inside_table_cell_produces_decoration() {
                 anchor_href: None,
                 tooltip: None,
                 vertical_alignment: VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
             }],
             alignment: Alignment::Left,
             top_margin: 0.0,
@@ -1530,6 +1572,9 @@ fn underline_inside_frame_produces_decoration() {
                 anchor_href: None,
                 tooltip: None,
                 vertical_alignment: VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
             }],
             alignment: Alignment::Left,
             top_margin: 0.0,
@@ -1679,6 +1724,9 @@ fn overline_produces_decoration_rect() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -1820,6 +1868,9 @@ fn relayout_block_shifts_table_below() {
             anchor_href: None,
             tooltip: None,
             vertical_alignment: VerticalAlignment::Normal,
+            image_name: None,
+            image_width: 0.0,
+            image_height: 0.0,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,
@@ -2105,4 +2156,195 @@ fn nested_frame_contributes_to_content_height() {
         height_with_nested,
         height_without
     );
+}
+
+// ── Inline image rendering ─────────────────────────────────────
+
+fn make_image_block(id: usize, image_name: &str, width: f32, height: f32) -> BlockLayoutParams {
+    let text = "\u{FFFC}";
+    BlockLayoutParams {
+        block_id: id,
+        position: 0,
+        text: text.to_string(),
+        fragments: vec![FragmentParams {
+            text: text.to_string(),
+            offset: 0,
+            length: 1,
+            font_family: None,
+            font_weight: None,
+            font_bold: None,
+            font_italic: None,
+            font_point_size: None,
+            underline_style: UnderlineStyle::None,
+            overline: false,
+            strikeout: false,
+            is_link: false,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            foreground_color: None,
+            underline_color: None,
+            background_color: None,
+            anchor_href: None,
+            tooltip: None,
+            vertical_alignment: VerticalAlignment::Normal,
+            image_name: Some(image_name.to_string()),
+            image_width: width,
+            image_height: height,
+        }],
+        alignment: Alignment::Left,
+        top_margin: 0.0,
+        bottom_margin: 0.0,
+        left_margin: 0.0,
+        right_margin: 0.0,
+        text_indent: 0.0,
+        list_marker: String::new(),
+        list_indent: 0.0,
+        tab_positions: vec![],
+        line_height_multiplier: None,
+        non_breakable_lines: false,
+        checkbox: None,
+        background_color: None,
+    }
+}
+
+#[test]
+fn image_produces_image_quad() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_image_block(1, "test.png", 100.0, 50.0)]);
+    let frame = ts.render();
+
+    assert_eq!(
+        frame.images.len(),
+        1,
+        "block with one image should produce one ImageQuad"
+    );
+    assert_eq!(frame.images[0].name, "test.png");
+    assert!(
+        (frame.images[0].screen[2] - 100.0).abs() < 0.1,
+        "image width should be 100.0, got {}",
+        frame.images[0].screen[2]
+    );
+    assert!(
+        (frame.images[0].screen[3] - 50.0).abs() < 0.1,
+        "image height should be 50.0, got {}",
+        frame.images[0].screen[3]
+    );
+}
+
+#[test]
+fn image_has_positive_content_height() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_image_block(1, "test.png", 100.0, 50.0)]);
+
+    assert!(
+        ts.content_height() > 0.0,
+        "block with image should have positive content height"
+    );
+}
+
+#[test]
+fn tall_image_expands_line_height() {
+    let mut ts = setup();
+    // A text-only block for baseline line height
+    ts.layout_blocks(vec![make_block(1, "Hello")]);
+    let text_height = ts.content_height();
+
+    // A block with a very tall image
+    ts.layout_blocks(vec![make_image_block(1, "tall.png", 50.0, 200.0)]);
+    let image_height = ts.content_height();
+
+    assert!(
+        image_height > text_height,
+        "tall image ({}) should produce taller content than text ({})",
+        image_height,
+        text_height
+    );
+}
+
+#[test]
+fn mixed_text_and_image_both_render() {
+    let mut ts = setup();
+    let text = "Hello\u{FFFC}";
+    ts.layout_blocks(vec![BlockLayoutParams {
+        block_id: 1,
+        position: 0,
+        text: text.to_string(),
+        fragments: vec![
+            FragmentParams {
+                text: "Hello".to_string(),
+                offset: 0,
+                length: 5,
+                font_family: None,
+                font_weight: None,
+                font_bold: None,
+                font_italic: None,
+                font_point_size: None,
+                underline_style: UnderlineStyle::None,
+                overline: false,
+                strikeout: false,
+                is_link: false,
+                letter_spacing: 0.0,
+                word_spacing: 0.0,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: None,
+                tooltip: None,
+                vertical_alignment: VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
+            },
+            FragmentParams {
+                text: "\u{FFFC}".to_string(),
+                offset: 5,
+                length: 1,
+                font_family: None,
+                font_weight: None,
+                font_bold: None,
+                font_italic: None,
+                font_point_size: None,
+                underline_style: UnderlineStyle::None,
+                overline: false,
+                strikeout: false,
+                is_link: false,
+                letter_spacing: 0.0,
+                word_spacing: 0.0,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: None,
+                tooltip: None,
+                vertical_alignment: VerticalAlignment::Normal,
+                image_name: Some("icon.png".to_string()),
+                image_width: 32.0,
+                image_height: 32.0,
+            },
+        ],
+        alignment: Alignment::Left,
+        top_margin: 0.0,
+        bottom_margin: 0.0,
+        left_margin: 0.0,
+        right_margin: 0.0,
+        text_indent: 0.0,
+        list_marker: String::new(),
+        list_indent: 0.0,
+        tab_positions: vec![],
+        line_height_multiplier: None,
+        non_breakable_lines: false,
+        checkbox: None,
+        background_color: None,
+    }]);
+    let frame = ts.render();
+
+    assert!(
+        !frame.glyphs.is_empty(),
+        "text fragment should produce glyph quads"
+    );
+    assert_eq!(
+        frame.images.len(),
+        1,
+        "image fragment should produce one ImageQuad"
+    );
+    assert_eq!(frame.images[0].name, "icon.png");
 }
