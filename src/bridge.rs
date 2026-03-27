@@ -112,7 +112,11 @@ pub fn convert_block(block: &BlockSnapshot) -> BlockLayoutParams {
         line_height_multiplier: block.block_format.line_height,
         non_breakable_lines: block.block_format.non_breakable_lines.unwrap_or(false),
         checkbox,
-        background_color: None, // TODO: parse CSS color string from block_format.background_color
+        background_color: block
+            .block_format
+            .background_color
+            .as_ref()
+            .and_then(|s| parse_css_color(s)),
     }
 }
 
@@ -137,12 +141,18 @@ fn convert_fragment(frag: &FragmentContent, heading_scale: f32) -> FragmentParam
             } else {
                 format.font_point_size
             },
-            underline: format.font_underline.unwrap_or(false),
+            underline_style: convert_underline_style(format),
             overline: format.font_overline.unwrap_or(false),
             strikeout: format.font_strikeout.unwrap_or(false),
             is_link: format.is_anchor.unwrap_or(false),
             letter_spacing: format.letter_spacing.unwrap_or(0) as f32,
             word_spacing: format.word_spacing.unwrap_or(0) as f32,
+            foreground_color: format.foreground_color.as_ref().map(convert_color),
+            underline_color: format.underline_color.as_ref().map(convert_color),
+            background_color: format.background_color.as_ref().map(convert_color),
+            anchor_href: format.anchor_href.clone(),
+            tooltip: format.tooltip.clone(),
+            vertical_alignment: convert_vertical_alignment(format),
         },
         FragmentContent::Image {
             name: _,
@@ -163,14 +173,164 @@ fn convert_fragment(frag: &FragmentContent, heading_scale: f32) -> FragmentParam
                 font_bold: None,
                 font_italic: None,
                 font_point_size: None,
-                underline: false,
+                underline_style: crate::types::UnderlineStyle::None,
                 overline: false,
                 strikeout: false,
                 is_link: format.is_anchor.unwrap_or(false),
                 letter_spacing: 0.0,
                 word_spacing: 0.0,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: format.anchor_href.clone(),
+                tooltip: format.tooltip.clone(),
+                vertical_alignment: crate::types::VerticalAlignment::Normal,
             }
         }
+    }
+}
+
+fn convert_vertical_alignment(
+    format: &text_document::TextFormat,
+) -> crate::types::VerticalAlignment {
+    use crate::types::VerticalAlignment;
+    match format.vertical_alignment {
+        Some(text_document::CharVerticalAlignment::SuperScript) => VerticalAlignment::SuperScript,
+        Some(text_document::CharVerticalAlignment::SubScript) => VerticalAlignment::SubScript,
+        _ => VerticalAlignment::Normal,
+    }
+}
+
+fn convert_underline_style(format: &text_document::TextFormat) -> crate::types::UnderlineStyle {
+    use crate::types::UnderlineStyle;
+    match format.underline_style {
+        Some(text_document::UnderlineStyle::SingleUnderline) => UnderlineStyle::Single,
+        Some(text_document::UnderlineStyle::DashUnderline) => UnderlineStyle::Dash,
+        Some(text_document::UnderlineStyle::DotLine) => UnderlineStyle::Dot,
+        Some(text_document::UnderlineStyle::DashDotLine) => UnderlineStyle::DashDot,
+        Some(text_document::UnderlineStyle::DashDotDotLine) => UnderlineStyle::DashDotDot,
+        Some(text_document::UnderlineStyle::WaveUnderline) => UnderlineStyle::Wave,
+        Some(text_document::UnderlineStyle::SpellCheckUnderline) => UnderlineStyle::SpellCheck,
+        Some(text_document::UnderlineStyle::NoUnderline) => UnderlineStyle::None,
+        None => {
+            if format.font_underline.unwrap_or(false) {
+                UnderlineStyle::Single
+            } else {
+                UnderlineStyle::None
+            }
+        }
+    }
+}
+
+fn convert_color(c: &text_document::Color) -> [f32; 4] {
+    [
+        c.red as f32 / 255.0,
+        c.green as f32 / 255.0,
+        c.blue as f32 / 255.0,
+        c.alpha as f32 / 255.0,
+    ]
+}
+
+/// Parse a CSS color string into RGBA floats (0.0-1.0).
+///
+/// Supports: `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb(r,g,b)`, `rgba(r,g,b,a)`,
+/// and common named colors.
+fn parse_css_color(s: &str) -> Option<[f32; 4]> {
+    let s = s.trim();
+
+    // Named colors
+    match s.to_ascii_lowercase().as_str() {
+        "transparent" => return Some([0.0, 0.0, 0.0, 0.0]),
+        "black" => return Some([0.0, 0.0, 0.0, 1.0]),
+        "white" => return Some([1.0, 1.0, 1.0, 1.0]),
+        "red" => return Some([1.0, 0.0, 0.0, 1.0]),
+        "green" => return Some([0.0, 128.0 / 255.0, 0.0, 1.0]),
+        "blue" => return Some([0.0, 0.0, 1.0, 1.0]),
+        "yellow" => return Some([1.0, 1.0, 0.0, 1.0]),
+        "cyan" | "aqua" => return Some([0.0, 1.0, 1.0, 1.0]),
+        "magenta" | "fuchsia" => return Some([1.0, 0.0, 1.0, 1.0]),
+        "gray" | "grey" => return Some([128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0]),
+        _ => {}
+    }
+
+    // Hex formats
+    if let Some(hex) = s.strip_prefix('#') {
+        let hex = hex.trim();
+        return match hex.len() {
+            3 => {
+                // #RGB
+                let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+                let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+                let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+                Some([
+                    (r * 17) as f32 / 255.0,
+                    (g * 17) as f32 / 255.0,
+                    (b * 17) as f32 / 255.0,
+                    1.0,
+                ])
+            }
+            4 => {
+                // #RGBA
+                let r = u8::from_str_radix(&hex[0..1], 16).ok()?;
+                let g = u8::from_str_radix(&hex[1..2], 16).ok()?;
+                let b = u8::from_str_radix(&hex[2..3], 16).ok()?;
+                let a = u8::from_str_radix(&hex[3..4], 16).ok()?;
+                Some([
+                    (r * 17) as f32 / 255.0,
+                    (g * 17) as f32 / 255.0,
+                    (b * 17) as f32 / 255.0,
+                    (a * 17) as f32 / 255.0,
+                ])
+            }
+            6 => {
+                // #RRGGBB
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+            }
+            8 => {
+                // #RRGGBBAA
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+                Some([
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b as f32 / 255.0,
+                    a as f32 / 255.0,
+                ])
+            }
+            _ => None,
+        };
+    }
+
+    // rgb(r, g, b) and rgba(r, g, b, a)
+    let inner = if let Some(inner) = s.strip_prefix("rgba(").and_then(|s| s.strip_suffix(')')) {
+        inner
+    } else if let Some(inner) = s.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
+        inner
+    } else {
+        return None;
+    };
+
+    let parts: Vec<&str> = inner.split(',').collect();
+    match parts.len() {
+        3 => {
+            let r: u8 = parts[0].trim().parse().ok()?;
+            let g: u8 = parts[1].trim().parse().ok()?;
+            let b: u8 = parts[2].trim().parse().ok()?;
+            Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
+        }
+        4 => {
+            let r: u8 = parts[0].trim().parse().ok()?;
+            let g: u8 = parts[1].trim().parse().ok()?;
+            let b: u8 = parts[2].trim().parse().ok()?;
+            let a: f32 = parts[3].trim().parse().ok()?;
+            Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a])
+        }
+        _ => None,
     }
 }
 
@@ -203,12 +363,11 @@ pub fn convert_table(table: &TableSnapshot) -> TableLayoutParams {
 fn convert_cell(cell: &CellSnapshot) -> CellLayoutParams {
     let blocks: Vec<BlockLayoutParams> = cell.blocks.iter().map(convert_block).collect();
 
-    // Parse background color from CSS color string (simplified)
     let background_color = cell
         .format
         .background_color
         .as_ref()
-        .map(|_| [0.9, 0.9, 0.9, 1.0]); // placeholder: light gray
+        .and_then(|s| parse_css_color(s));
 
     CellLayoutParams {
         row: cell.row,

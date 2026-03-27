@@ -104,6 +104,43 @@ pub enum DecorationKind {
     TableBorder,
     /// Table cell background color.
     TableCellBackground,
+    /// Text-level background highlight (behind individual text runs).
+    /// Adapters should draw these before glyph quads so text appears on top.
+    TextBackground,
+}
+
+/// Underline style for text decorations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UnderlineStyle {
+    /// No underline.
+    #[default]
+    None,
+    /// Solid single underline.
+    Single,
+    /// Dashed underline.
+    Dash,
+    /// Dotted underline.
+    Dot,
+    /// Alternating dash-dot pattern.
+    DashDot,
+    /// Alternating dash-dot-dot pattern.
+    DashDotDot,
+    /// Wavy underline.
+    Wave,
+    /// Spell-check underline (wavy, typically red).
+    SpellCheck,
+}
+
+/// Vertical alignment for characters (superscript, subscript, etc.).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum VerticalAlignment {
+    /// Normal baseline alignment.
+    #[default]
+    Normal,
+    /// Superscript: smaller size, shifted up.
+    SuperScript,
+    /// Subscript: smaller size, shifted down.
+    SubScript,
 }
 
 // ── Hit testing ─────────────────────────────────────────────────
@@ -119,6 +156,8 @@ pub struct HitTestResult {
     pub offset_in_block: usize,
     /// What region of the layout was hit.
     pub region: HitRegion,
+    /// Tooltip text if the hit position has a tooltip. None otherwise.
+    pub tooltip: Option<String>,
 }
 
 /// What region of the layout a hit test landed in.

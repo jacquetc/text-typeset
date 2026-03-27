@@ -76,7 +76,7 @@ pub struct FragmentParams {
     pub font_bold: Option<bool>,
     pub font_italic: Option<bool>,
     pub font_point_size: Option<u32>,
-    pub underline: bool,
+    pub underline_style: crate::types::UnderlineStyle,
     pub overline: bool,
     pub strikeout: bool,
     pub is_link: bool,
@@ -84,6 +84,18 @@ pub struct FragmentParams {
     pub letter_spacing: f32,
     /// Extra space added after space glyphs (in pixels). From TextFormat::word_spacing.
     pub word_spacing: f32,
+    /// Text foreground color (RGBA). None means default (black).
+    pub foreground_color: Option<[f32; 4]>,
+    /// Underline color (RGBA). None means use foreground_color.
+    pub underline_color: Option<[f32; 4]>,
+    /// Text-level background highlight color (RGBA). None means transparent.
+    pub background_color: Option<[f32; 4]>,
+    /// Hyperlink destination URL.
+    pub anchor_href: Option<String>,
+    /// Tooltip text.
+    pub tooltip: Option<String>,
+    /// Vertical alignment (normal, superscript, subscript).
+    pub vertical_alignment: crate::types::VerticalAlignment,
 }
 
 /// Lay out a single block: resolve fonts, shape fragments, break into lines.
@@ -100,13 +112,22 @@ pub fn layout_block(
     let mut default_metrics: Option<FontMetricsPx> = None;
 
     for frag in &params.fragments {
+        // Scale font size for superscript/subscript
+        let font_point_size = match frag.vertical_alignment {
+            crate::types::VerticalAlignment::SuperScript
+            | crate::types::VerticalAlignment::SubScript => frag
+                .font_point_size
+                .map(|s| ((s as f32 * 0.65) as u32).max(1)),
+            crate::types::VerticalAlignment::Normal => frag.font_point_size,
+        };
+
         let resolved = resolve_font(
             registry,
             frag.font_family.as_deref(),
             frag.font_weight,
             frag.font_bold,
             frag.font_italic,
-            frag.font_point_size,
+            font_point_size,
         );
 
         if let Some(resolved) = resolved {
@@ -116,10 +137,16 @@ pub fn layout_block(
             }
 
             if let Some(mut run) = shape_text(registry, &resolved, &frag.text, frag.offset) {
-                run.underline = frag.underline;
+                run.underline_style = frag.underline_style;
                 run.overline = frag.overline;
                 run.strikeout = frag.strikeout;
                 run.is_link = frag.is_link;
+                run.foreground_color = frag.foreground_color;
+                run.underline_color = frag.underline_color;
+                run.background_color = frag.background_color;
+                run.anchor_href = frag.anchor_href.clone();
+                run.tooltip = frag.tooltip.clone();
+                run.vertical_alignment = frag.vertical_alignment;
 
                 // Apply letter_spacing and word_spacing post-shaping
                 if frag.letter_spacing != 0.0 || frag.word_spacing != 0.0 {

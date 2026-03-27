@@ -1,9 +1,9 @@
-use text_typeset::Typesetter;
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams, layout_block};
 use text_typeset::layout::flow::FlowLayout;
 use text_typeset::layout::paragraph::{Alignment, break_into_lines};
 use text_typeset::shaping::shaper::{font_metrics_px, shape_text};
+use text_typeset::{Typesetter, UnderlineStyle, VerticalAlignment};
 
 const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
 
@@ -242,12 +242,18 @@ fn make_block_params(block_id: usize, text: &str) -> BlockLayoutParams {
             font_bold: None,
             font_italic: None,
             font_point_size: None,
-            underline: false,
+            underline_style: UnderlineStyle::None,
             overline: false,
             strikeout: false,
             is_link: false,
             letter_spacing: 0.0,
             word_spacing: 0.0,
+            foreground_color: None,
+            underline_color: None,
+            background_color: None,
+            anchor_href: None,
+            tooltip: None,
+            vertical_alignment: VerticalAlignment::Normal,
         }],
         alignment: Alignment::Left,
         top_margin: 0.0,

@@ -210,10 +210,20 @@ pub(crate) fn render_block_at_offset(
 
         for positioned_run in &line.runs {
             let pen_x = offset_x + block.left_margin + positioned_run.x;
+            // Adjust baseline for superscript/subscript
+            let baseline_offset = match positioned_run.decorations.vertical_alignment {
+                crate::types::VerticalAlignment::SuperScript => {
+                    -(positioned_run.shaped_run.size_px * 0.35)
+                }
+                crate::types::VerticalAlignment::SubScript => {
+                    positioned_run.shaped_run.size_px * 0.2
+                }
+                crate::types::VerticalAlignment::Normal => 0.0,
+            };
             render_run_glyphs(
                 &positioned_run.shaped_run,
                 pen_x,
-                line_y,
+                line_y + baseline_offset,
                 registry,
                 atlas,
                 cache,
@@ -422,7 +432,7 @@ fn render_run_glyphs(
             let color = if cached.is_color {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
-                [0.0, 0.0, 0.0, 1.0]
+                run.foreground_color.unwrap_or([0.0, 0.0, 0.0, 1.0])
             };
             render_frame.glyphs.push(GlyphQuad {
                 screen: [

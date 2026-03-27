@@ -56,7 +56,7 @@ mod typesetter;
 // Public API
 pub use types::{
     BlockVisualInfo, CursorDisplay, DecorationKind, DecorationRect, FontFaceId, GlyphQuad,
-    HitRegion, HitTestResult, ImageQuad, RenderFrame,
+    HitRegion, HitTestResult, ImageQuad, RenderFrame, UnderlineStyle, VerticalAlignment,
 };
 
 pub use typesetter::{ContentWidthMode, Typesetter};

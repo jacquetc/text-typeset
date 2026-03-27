@@ -22,6 +22,7 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
             block_id,
             offset_in_block: 0,
             region: HitRegion::LeftMargin,
+            tooltip: None,
         });
     }
 
@@ -37,6 +38,7 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
                     block_id,
                     offset_in_block: last_line.char_range.end,
                     region: HitRegion::BelowContent,
+                    tooltip: None,
                 });
             }
             return Some(HitTestResult {
@@ -44,19 +46,21 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
                 block_id,
                 offset_in_block: 0,
                 region: HitRegion::BelowContent,
+                tooltip: None,
             });
         }
     };
 
     // Find which glyph within the line
     let local_x = x - block.left_margin;
-    let (offset_in_block, region) = find_position_in_line(line, local_x);
+    let (offset_in_block, region, tooltip) = find_position_in_line(line, local_x);
 
     Some(HitTestResult {
         position: block.position + offset_in_block,
         block_id,
         offset_in_block,
         region,
+        tooltip,
     })
 }
 
@@ -161,7 +165,7 @@ fn find_line_at_y(lines: &[LayoutLine], local_y: f32) -> Option<&LayoutLine> {
     None
 }
 
-fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion) {
+fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion, Option<String>) {
     for run in &line.runs {
         let mut glyph_x = run.x;
 
@@ -169,19 +173,18 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion) 
             let glyph_mid = glyph_x + glyph.x_advance / 2.0;
 
             if local_x < glyph_mid {
-                // Click is on the left half of this glyph - position before it
                 let offset = glyph.cluster as usize;
+                let tooltip = run.decorations.tooltip.clone();
                 if run.decorations.is_link {
-                    // Report as link region. The adapter can look up the actual
-                    // href from the document position.
                     return (
                         offset,
                         HitRegion::Link {
-                            href: String::new(),
+                            href: run.decorations.anchor_href.clone().unwrap_or_default(),
                         },
+                        tooltip,
                     );
                 }
-                return (offset, HitRegion::Text);
+                return (offset, HitRegion::Text, tooltip);
             }
 
             glyph_x += glyph.x_advance;
@@ -189,7 +192,7 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion) 
     }
 
     // Past end of line
-    (line.char_range.end, HitRegion::PastLineEnd)
+    (line.char_range.end, HitRegion::PastLineEnd, None)
 }
 
 fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {

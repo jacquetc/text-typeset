@@ -23,8 +23,20 @@ pub struct ShapedRun {
     pub advance_width: f32,
     pub text_range: Range<usize>,
     /// Decoration flags from the source fragment's TextFormat.
-    pub underline: bool,
+    pub underline_style: crate::types::UnderlineStyle,
     pub overline: bool,
     pub strikeout: bool,
     pub is_link: bool,
+    /// Text foreground color (RGBA). None means default (black).
+    pub foreground_color: Option<[f32; 4]>,
+    /// Underline color (RGBA). None means use foreground_color.
+    pub underline_color: Option<[f32; 4]>,
+    /// Text-level background highlight color (RGBA). None means transparent.
+    pub background_color: Option<[f32; 4]>,
+    /// Hyperlink destination URL.
+    pub anchor_href: Option<String>,
+    /// Tooltip text.
+    pub tooltip: Option<String>,
+    /// Vertical alignment (normal, superscript, subscript).
+    pub vertical_alignment: crate::types::VerticalAlignment,
 }

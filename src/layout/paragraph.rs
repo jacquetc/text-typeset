@@ -265,10 +265,16 @@ fn build_line(
                 if let Some((pr, advance)) = sub_run {
                     positioned_runs.push(PositionedRun {
                         decorations: RunDecorations {
-                            underline: pr.underline,
+                            underline_style: pr.underline_style,
                             overline: pr.overline,
                             strikeout: pr.strikeout,
                             is_link: pr.is_link,
+                            foreground_color: pr.foreground_color,
+                            underline_color: pr.underline_color,
+                            background_color: pr.background_color,
+                            anchor_href: pr.anchor_href.clone(),
+                            tooltip: pr.tooltip.clone(),
+                            vertical_alignment: pr.vertical_alignment,
                         },
                         shaped_run: pr,
                         x,
@@ -294,10 +300,16 @@ fn build_line(
         if let Some((pr, advance)) = sub_run {
             positioned_runs.push(PositionedRun {
                 decorations: RunDecorations {
-                    underline: pr.underline,
+                    underline_style: pr.underline_style,
                     overline: pr.overline,
                     strikeout: pr.strikeout,
                     is_link: pr.is_link,
+                    foreground_color: pr.foreground_color,
+                    underline_color: pr.underline_color,
+                    background_color: pr.background_color,
+                    anchor_href: pr.anchor_href.clone(),
+                    tooltip: pr.tooltip.clone(),
+                    vertical_alignment: pr.vertical_alignment,
                 },
                 shaped_run: pr,
                 x,
@@ -382,10 +394,16 @@ fn extract_sub_run(
         glyphs: sub_glyphs,
         advance_width: advance,
         text_range: run.text_range.clone(),
-        underline: run.underline,
+        underline_style: run.underline_style,
         overline: run.overline,
         strikeout: run.strikeout,
         is_link: run.is_link,
+        foreground_color: run.foreground_color,
+        underline_color: run.underline_color,
+        background_color: run.background_color,
+        anchor_href: run.anchor_href.clone(),
+        tooltip: run.tooltip.clone(),
+        vertical_alignment: run.vertical_alignment,
     };
     Some((sub_run, advance))
 }

@@ -169,10 +169,16 @@ pub fn shape_text_directed(
         glyphs,
         advance_width: total_advance,
         text_range: text_offset..text_offset + text.len(),
-        underline: false,
+        underline_style: crate::types::UnderlineStyle::None,
         overline: false,
         strikeout: false,
         is_link: false,
+        foreground_color: None,
+        underline_color: None,
+        background_color: None,
+        anchor_href: None,
+        tooltip: None,
+        vertical_alignment: crate::types::VerticalAlignment::Normal,
     })
 }
 
@@ -229,10 +235,16 @@ pub fn shape_text_with_buffer(
         glyphs,
         advance_width: total_advance,
         text_range: text_offset..text_offset + text.len(),
-        underline: false,
+        underline_style: crate::types::UnderlineStyle::None,
         overline: false,
         strikeout: false,
         is_link: false,
+        foreground_color: None,
+        underline_color: None,
+        background_color: None,
+        anchor_href: None,
+        tooltip: None,
+        vertical_alignment: crate::types::VerticalAlignment::Normal,
     };
 
     // Reclaim the buffer for reuse
