@@ -351,6 +351,24 @@ fn render_frame_layout(
         );
     }
 
+    // Render nested frames (recursive).
+    // Nested frames store positions relative to the parent frame's content area,
+    // so we render them with the parent's content offset already applied.
+    for nested in &frame.frames {
+        render_nested_frame(
+            nested,
+            offset_x,
+            offset_y,
+            registry,
+            atlas,
+            cache,
+            scale_context,
+            scroll_offset,
+            viewport_height,
+            render_frame,
+        );
+    }
+
     // Frame border decorations
     append_frame_border_decorations(frame, scroll_offset, &mut render_frame.decorations);
 }
@@ -415,6 +433,104 @@ pub fn append_frame_border_decorations(
             crate::layout::frame::FrameBorderStyle::None => {}
         }
     }
+}
+
+/// Render a nested frame with parent content offsets applied.
+#[allow(clippy::too_many_arguments)]
+fn render_nested_frame(
+    nested: &crate::layout::frame::FrameLayout,
+    parent_x: f32,
+    parent_y: f32,
+    registry: &FontRegistry,
+    atlas: &mut GlyphAtlas,
+    cache: &mut GlyphCache,
+    scale_context: &mut swash::scale::ScaleContext,
+    scroll_offset: f32,
+    viewport_height: f32,
+    render_frame: &mut RenderFrame,
+) {
+    let frame_x = parent_x + nested.x;
+    let frame_y = parent_y + nested.y;
+    let content_x = frame_x + nested.content_x;
+    let content_y = frame_y + nested.content_y;
+
+    // Render nested blocks
+    for block in &nested.blocks {
+        render_block_at_offset(
+            block,
+            content_x,
+            content_y,
+            registry,
+            atlas,
+            cache,
+            scale_context,
+            scroll_offset,
+            viewport_height,
+            render_frame,
+        );
+        let decos = generate_block_decorations(
+            block,
+            registry,
+            scroll_offset,
+            viewport_height,
+            content_x,
+            content_y,
+            nested.content_width,
+        );
+        render_frame.decorations.extend(decos);
+    }
+
+    // Render nested tables
+    for table in &nested.tables {
+        render_table_cells(
+            table,
+            content_x,
+            content_y,
+            registry,
+            atlas,
+            cache,
+            scale_context,
+            scroll_offset,
+            viewport_height,
+            render_frame,
+        );
+    }
+
+    // Recurse into further nested frames
+    for inner in &nested.frames {
+        render_nested_frame(
+            inner,
+            content_x,
+            content_y,
+            registry,
+            atlas,
+            cache,
+            scale_context,
+            scroll_offset,
+            viewport_height,
+            render_frame,
+        );
+    }
+
+    // Border decorations for this nested frame
+    // Need to temporarily adjust x/y for the border drawing
+    let border_frame = crate::layout::frame::FrameLayout {
+        frame_id: nested.frame_id,
+        x: frame_x,
+        y: frame_y,
+        total_width: nested.total_width,
+        total_height: nested.total_height,
+        content_x: nested.content_x,
+        content_y: nested.content_y,
+        content_width: nested.content_width,
+        content_height: nested.content_height,
+        blocks: Vec::new(),
+        tables: Vec::new(),
+        frames: Vec::new(),
+        border_width: nested.border_width,
+        border_style: nested.border_style,
+    };
+    append_frame_border_decorations(&border_frame, scroll_offset, &mut render_frame.decorations);
 }
 
 /// Render all glyphs in a shaped run at the given position.

@@ -2,7 +2,7 @@ use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
-use text_typeset::{Typesetter, UnderlineStyle, VerticalAlignment};
+use text_typeset::{DecorationKind, Typesetter, UnderlineStyle, VerticalAlignment};
 
 const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
 
@@ -1230,6 +1230,7 @@ fn frame_renders_nested_block_glyphs() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Inside frame")],
         tables: vec![],
+        frames: vec![],
     });
     let frame = ts.render();
 
@@ -1258,6 +1259,7 @@ fn frame_contributes_to_content_height() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Content")],
         tables: vec![],
+        frames: vec![],
     });
 
     assert!(
@@ -1287,6 +1289,7 @@ fn block_then_frame_renders_frame_below() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Below")],
         tables: vec![],
+        frames: vec![],
     });
 
     assert!(
@@ -1319,6 +1322,7 @@ fn frame_with_border_produces_decorations() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Bordered")],
         tables: vec![],
+        frames: vec![],
     });
     let frame = ts.render();
 
@@ -1352,6 +1356,7 @@ fn float_right_frame_positioned_at_right_edge() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Right")],
         tables: vec![],
+        frames: vec![],
     });
     let frame = ts.render();
 
@@ -1389,6 +1394,7 @@ fn absolute_frame_does_not_affect_content_height() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Floating")],
         tables: vec![],
+        frames: vec![],
     });
 
     assert!(
@@ -1540,6 +1546,7 @@ fn underline_inside_frame_produces_decoration() {
             background_color: None,
         }],
         tables: vec![],
+        frames: vec![],
     });
     let frame = ts.render();
 
@@ -1721,6 +1728,7 @@ fn float_left_frame_renders() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("FloatL")],
         tables: vec![],
+        frames: vec![],
     });
     let frame = ts.render();
     assert!(
@@ -1868,6 +1876,7 @@ fn frame_with_nested_table_renders() {
                 cells: vec![make_cell(0, 0, "A"), make_cell(0, 1, "B")],
             },
         )],
+        frames: vec![],
     });
     let frame = ts.render();
     assert!(
@@ -1938,6 +1947,7 @@ fn render_block_only_preserves_frame_decorations() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_block(2, "Frame content")],
         tables: vec![],
+        frames: vec![],
     });
 
     // Full render: should produce frame border decorations (Background kind)
@@ -1964,5 +1974,135 @@ fn render_block_only_preserves_frame_decorations() {
         bg_decos_after.len(),
         bg_count,
         "render_block_only should preserve frame border decorations"
+    );
+}
+
+#[test]
+fn nested_frame_renders_inner_content() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 1,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::LeftOnly,
+        blocks: vec![make_block(10, "Outer frame text")],
+        tables: vec![],
+        frames: vec![(
+            1,
+            FrameLayoutParams {
+                frame_id: 2,
+                position: FramePosition::Inline,
+                width: None,
+                height: None,
+                margin_top: 4.0,
+                margin_bottom: 4.0,
+                margin_left: 16.0,
+                margin_right: 0.0,
+                padding: 8.0,
+                border_width: 3.0,
+                border_style: FrameBorderStyle::LeftOnly,
+                blocks: vec![make_block(20, "Inner frame text")],
+                tables: vec![],
+                frames: vec![],
+            },
+        )],
+    });
+    let frame = ts.render();
+
+    // Both outer and inner text should produce glyphs
+    assert!(
+        frame.glyphs.len() >= 10,
+        "nested frames should render both outer and inner text, got {} glyphs",
+        frame.glyphs.len()
+    );
+
+    // Should produce at least 2 border decorations (one per frame)
+    let border_decos: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Background)
+        .collect();
+    assert!(
+        border_decos.len() >= 2,
+        "nested frames should produce border decorations for both frames, got {}",
+        border_decos.len()
+    );
+}
+
+#[test]
+fn nested_frame_contributes_to_content_height() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 1,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
+        blocks: vec![make_block(10, "Outer")],
+        tables: vec![],
+        frames: vec![(
+            1,
+            FrameLayoutParams {
+                frame_id: 2,
+                position: FramePosition::Inline,
+                width: None,
+                height: None,
+                margin_top: 0.0,
+                margin_bottom: 0.0,
+                margin_left: 0.0,
+                margin_right: 0.0,
+                padding: 4.0,
+                border_width: 1.0,
+                border_style: FrameBorderStyle::Full,
+                blocks: vec![make_block(20, "Inner")],
+                tables: vec![],
+                frames: vec![],
+            },
+        )],
+    });
+
+    let height_with_nested = ts.content_height();
+
+    // Compare with a frame that has only the outer block (no nested frame)
+    let mut ts2 = setup();
+    ts2.layout_blocks(vec![]);
+    ts2.add_frame(&FrameLayoutParams {
+        frame_id: 1,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
+        blocks: vec![make_block(10, "Outer")],
+        tables: vec![],
+        frames: vec![],
+    });
+
+    let height_without = ts2.content_height();
+    assert!(
+        height_with_nested > height_without,
+        "nested frame should increase content height: {} vs {}",
+        height_with_nested,
+        height_without
     );
 }

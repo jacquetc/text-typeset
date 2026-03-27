@@ -774,6 +774,7 @@ fn selection_highlights_text_inside_frame() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_block_at(200, 3, "World")],
         tables: vec![],
+        frames: vec![],
     });
     // Select "World" (positions 3..8)
     ts.set_cursor(&text_typeset::CursorDisplay {

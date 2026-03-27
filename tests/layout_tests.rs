@@ -1012,6 +1012,7 @@ fn relayout_frame_block_updates_frame_height() {
         border_style: FrameBorderStyle::Full,
         blocks: vec![make_block_at(200, 7, "Short")],
         tables: vec![],
+        frames: vec![],
     });
 
     let height_before = ts.content_height();

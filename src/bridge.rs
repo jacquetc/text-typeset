@@ -388,6 +388,7 @@ fn convert_cell(cell: &CellSnapshot) -> CellLayoutParams {
 pub fn convert_frame(frame: &FrameSnapshot) -> FrameLayoutParams {
     let mut blocks = Vec::new();
     let mut tables = Vec::new();
+    let mut frames = Vec::new();
 
     for (i, element) in frame.elements.iter().enumerate() {
         match element {
@@ -397,8 +398,8 @@ pub fn convert_frame(frame: &FrameSnapshot) -> FrameLayoutParams {
             FlowElementSnapshot::Table(table) => {
                 tables.push((i, convert_table(table)));
             }
-            FlowElementSnapshot::Frame(_) => {
-                // Nested frames within frames -could recurse, but for now skip
+            FlowElementSnapshot::Frame(inner_frame) => {
+                frames.push((i, convert_frame(inner_frame)));
             }
         }
     }
@@ -441,5 +442,6 @@ pub fn convert_frame(frame: &FrameSnapshot) -> FrameLayoutParams {
         },
         blocks,
         tables,
+        frames,
     }
 }

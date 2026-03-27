@@ -54,9 +54,10 @@ pub struct FrameLayoutParams {
     pub padding: f32,
     pub border_width: f32,
     pub border_style: FrameBorderStyle,
-    /// Nested flow elements: blocks and tables within the frame.
+    /// Nested flow elements: blocks, tables, and frames within the frame.
     pub blocks: Vec<BlockLayoutParams>,
     pub tables: Vec<(usize, TableLayoutParams)>, // (flow_index, params) for ordering
+    pub frames: Vec<(usize, FrameLayoutParams)>, // (flow_index, params) for ordering
 }
 
 /// Computed layout for a frame.
@@ -72,6 +73,7 @@ pub struct FrameLayout {
     pub content_height: f32,
     pub blocks: Vec<BlockLayout>,
     pub tables: Vec<TableLayout>,
+    pub frames: Vec<FrameLayout>,
     pub border_width: f32,
     pub border_style: FrameBorderStyle,
 }
@@ -110,6 +112,16 @@ pub fn layout_frame(
         tables.push(table);
     }
 
+    // Lay out nested frames (recursive)
+    let mut nested_frames = Vec::new();
+    for (_flow_idx, frame_params) in &params.frames {
+        let mut nested = layout_frame(registry, frame_params, content_width);
+        nested.y = content_y;
+        nested.x = 0.0;
+        content_y += nested.total_height;
+        nested_frames.push(nested);
+    }
+
     let auto_content_height = content_y;
     let content_height = params
         .height
@@ -136,6 +148,7 @@ pub fn layout_frame(
         content_height,
         blocks,
         tables,
+        frames: nested_frames,
         border_width: border,
         border_style: params.border_style,
     }
