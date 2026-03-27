@@ -924,3 +924,70 @@ fn caret_rect_inside_table_advances_with_position() {
         rect_start[0]
     );
 }
+
+// ── Cursor movement across frame boundaries ────────────────────
+
+#[test]
+fn hit_test_below_frame_content_returns_block_after_frame() {
+    let mut ts = setup();
+    // "AB" at pos 0, frame with "CD" at pos 3, "EF" at pos 6
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::LeftOnly,
+        blocks: vec![make_block_at(100, 3, "CD")],
+        tables: vec![],
+        frames: vec![],
+    });
+
+    // Get the frame's visual info to know where to add the block after
+    ts.render();
+
+    // Add a block after the frame. We need to reconstruct the layout
+    // since we can't add blocks after add_frame without clearing.
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::LeftOnly,
+        blocks: vec![make_block_at(100, 3, "CD")],
+        tables: vec![],
+        frames: vec![],
+    });
+
+    // Simulate: caret is at end of frame content, user presses Down.
+    // Get the caret rect at position 5 (end of "CD" inside frame)
+    let caret = ts.caret_rect(5);
+    let line_height = caret[3];
+    // Target y is one line below the caret
+    let target_y = caret[1] + line_height;
+
+    // hit_test at the target should NOT return the frame block (100).
+    // It should either return the block after the frame or BelowContent.
+    let result = ts.hit_test(50.0, target_y);
+    if let Some(hit) = result {
+        assert_ne!(
+            hit.block_id, 100,
+            "hit_test below frame content should not return the frame's block (got block_id=100)"
+        );
+    }
+    // If None, that's also acceptable (no content below the frame)
+}

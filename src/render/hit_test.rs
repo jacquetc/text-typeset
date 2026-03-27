@@ -175,6 +175,14 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
         let offset_y = frame.y + frame.content_y;
         let local_y = doc_y - offset_y;
 
+        // Only claim the hit if the point is within the content area.
+        // Points in the frame's chrome (margin/border/padding) should fall
+        // through to subsequent flow items so cursor Up/Down can cross
+        // frame boundaries.
+        if local_y < 0.0 || local_y >= frame.content_height {
+            continue;
+        }
+
         // Try tables inside the frame first
         for table in &frame.tables {
             if local_y >= table.y
@@ -194,7 +202,8 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
             }
         }
 
-        // Fallback: last block in frame
+        // Fallback: last block in frame (point is within content area
+        // but between blocks, e.g. in margin collapsing space)
         if let Some(block) = frame.blocks.last() {
             return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
         }
