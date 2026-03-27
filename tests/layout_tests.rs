@@ -147,6 +147,29 @@ fn justify_alignment_fills_line_width() {
 }
 
 #[test]
+fn justify_alignment_works_with_multibyte_text() {
+    let ts = setup();
+    // Text with multibyte characters before spaces. If justify_line uses
+    // char offsets as byte offsets to find spaces, the indices will be wrong
+    // for text where byte offset != char offset.
+    let text = "\u{00e9}\u{00e9}\u{00e9} word word word word word word word word end.";
+    let lines = layout_text(&ts, text, 300.0, Alignment::Justify);
+
+    if lines.len() > 1 {
+        for (i, line) in lines.iter().enumerate() {
+            if i < lines.len() - 1 && !line.runs.is_empty() {
+                assert!(
+                    (line.width - 300.0).abs() < 5.0,
+                    "justified line {} with multibyte text: width ({}) should be close to 300.0",
+                    i,
+                    line.width
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn lines_have_positive_height() {
     let ts = setup();
     let lines = layout_text(&ts, "Hello world", 800.0, Alignment::Left);

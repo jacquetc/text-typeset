@@ -172,6 +172,18 @@ pub fn break_into_lines(
         lines.push(make_empty_line(metrics, 0..0));
     }
 
+    // Convert glyph cluster values from byte offsets to char offsets.
+    // This must happen AFTER alignment because justify_line needs byte
+    // offsets to find space characters in the original text.
+    for line in &mut lines {
+        for run in &mut line.runs {
+            for glyph in &mut run.shaped_run.glyphs {
+                glyph.cluster =
+                    byte_offset_to_char_offset(text, glyph.cluster as usize) as u32;
+            }
+        }
+    }
+
     lines
 }
 
@@ -345,13 +357,6 @@ fn build_line(
     };
     let char_start = byte_offset_to_char_offset(text, byte_start);
     let char_end = byte_offset_to_char_offset(text, byte_end);
-
-    // Convert glyph cluster values from byte offsets to char offsets
-    for run in &mut positioned_runs {
-        for glyph in &mut run.shaped_run.glyphs {
-            glyph.cluster = byte_offset_to_char_offset(text, glyph.cluster as usize) as u32;
-        }
-    }
 
     let line_height = metrics.ascent + metrics.descent + metrics.leading;
 
