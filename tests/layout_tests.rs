@@ -1,7 +1,9 @@
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams, layout_block};
 use text_typeset::layout::flow::FlowLayout;
+use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::{Alignment, break_into_lines};
+use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::shaping::shaper::{font_metrics_px, shape_text};
 use text_typeset::{Typesetter, UnderlineStyle, VerticalAlignment};
 
@@ -869,5 +871,159 @@ fn relayout_block_handles_top_margin_change() {
         "block 3 should shift down when block 2 moves: {} -> {}",
         y3_before,
         y3_after
+    );
+}
+
+// ── Relayout in tables/frames ──────────────────────────────────
+
+fn make_block_at(id: usize, position: usize, text: &str) -> BlockLayoutParams {
+    BlockLayoutParams {
+        block_id: id,
+        position,
+        text: text.to_string(),
+        fragments: vec![FragmentParams {
+            text: text.to_string(),
+            offset: 0,
+            length: text.len(),
+            font_family: None,
+            font_weight: None,
+            font_bold: None,
+            font_italic: None,
+            font_point_size: None,
+            underline_style: UnderlineStyle::None,
+            overline: false,
+            strikeout: false,
+            is_link: false,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            foreground_color: None,
+            underline_color: None,
+            background_color: None,
+            anchor_href: None,
+            tooltip: None,
+            vertical_alignment: VerticalAlignment::Normal,
+        }],
+        alignment: Alignment::Left,
+        top_margin: 0.0,
+        bottom_margin: 0.0,
+        left_margin: 0.0,
+        right_margin: 0.0,
+        text_indent: 0.0,
+        list_marker: String::new(),
+        list_indent: 0.0,
+        tab_positions: vec![],
+        line_height_multiplier: None,
+        non_breakable_lines: false,
+        checkbox: None,
+        background_color: None,
+    }
+}
+
+#[test]
+fn relayout_table_block_updates_table_height() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(include_bytes!("../test-fonts/NotoSans-Variable.ttf"));
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    ts.layout_blocks(vec![make_block_at(1, 0, "Before")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![CellLayoutParams {
+            row: 0,
+            column: 0,
+            blocks: vec![make_block_at(100, 7, "Short")],
+            background_color: None,
+        }],
+    });
+    ts.layout_blocks(vec![make_block_at(1, 0, "Before")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![CellLayoutParams {
+            row: 0,
+            column: 0,
+            blocks: vec![make_block_at(100, 7, "Short")],
+            background_color: None,
+        }],
+    });
+    // Add a block after the table
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![CellLayoutParams {
+            row: 0,
+            column: 0,
+            blocks: vec![make_block_at(100, 7, "Short")],
+            background_color: None,
+        }],
+    });
+
+    let height_before = ts.content_height();
+
+    // Relayout the table cell block with much longer text that wraps
+    let long_text = "This is a much longer piece of text that should cause the table cell to grow in height because it wraps to multiple lines.";
+    ts.relayout_block(&make_block_at(100, 7, long_text));
+
+    let height_after = ts.content_height();
+    assert!(
+        height_after > height_before,
+        "content height should grow after relayout with longer text: {} -> {}",
+        height_before,
+        height_after
+    );
+}
+
+#[test]
+fn relayout_frame_block_updates_frame_height() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(include_bytes!("../test-fonts/NotoSans-Variable.ttf"));
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    ts.layout_blocks(vec![make_block_at(1, 0, "Before")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
+        blocks: vec![make_block_at(200, 7, "Short")],
+        tables: vec![],
+    });
+
+    let height_before = ts.content_height();
+
+    let long_text = "This is a much longer piece of text that should cause the frame to grow in height because it wraps to multiple lines.";
+    ts.relayout_block(&make_block_at(200, 7, long_text));
+
+    let height_after = ts.content_height();
+    assert!(
+        height_after > height_before,
+        "content height should grow after relayout frame block: {} -> {}",
+        height_before,
+        height_after
     );
 }

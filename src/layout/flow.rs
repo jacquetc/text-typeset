@@ -204,13 +204,52 @@ impl FlowLayout {
         }
     }
 
-    /// Update a single block's layout and shift subsequent blocks if the
-    /// position or height changed.
+    /// Update a single block's layout and shift subsequent items if height changed.
     ///
-    /// If the block's top margin changed, its y position is recomputed using
-    /// margin collapsing with the previous block. Subsequent items are shifted
-    /// by the resulting delta.
+    /// Finds the block in top-level blocks, table cells, or frames, re-layouts
+    /// it, and propagates any height delta to subsequent flow items.
     pub fn relayout_block(
+        &mut self,
+        registry: &FontRegistry,
+        params: &BlockLayoutParams,
+        available_width: f32,
+    ) {
+        let block_id = params.block_id;
+
+        // Top-level block
+        if self.blocks.contains_key(&block_id) {
+            self.relayout_top_level_block(registry, params, available_width);
+            return;
+        }
+
+        // Table cell block: scan tables for the block_id
+        let table_match = self.tables.iter().find_map(|(&tid, table)| {
+            for cell in &table.cell_layouts {
+                if cell.blocks.iter().any(|b| b.block_id == block_id) {
+                    return Some((tid, cell.row, cell.column));
+                }
+            }
+            None
+        });
+        if let Some((table_id, row, col)) = table_match {
+            self.relayout_table_block(registry, params, table_id, row, col);
+            return;
+        }
+
+        // Frame block: scan frames for the block_id
+        let frame_match = self.frames.iter().find_map(|(&fid, frame)| {
+            if frame.blocks.iter().any(|b| b.block_id == block_id) {
+                return Some(fid);
+            }
+            None
+        });
+        if let Some(frame_id) = frame_match {
+            self.relayout_frame_block(registry, params, frame_id);
+        }
+    }
+
+    /// Relayout a top-level block (existing logic).
+    fn relayout_top_level_block(
         &mut self,
         registry: &FontRegistry,
         params: &BlockLayoutParams,
@@ -235,7 +274,6 @@ impl FlowLayout {
         let mut block = layout_block(registry, params, available_width);
         block.y = old_y;
 
-        // If top margin changed, recompute this block's y position
         if (block.top_margin - old_top_margin).abs() > 0.001 {
             let prev_bm = self.prev_block_bottom_margin(block_id).unwrap_or(0.0);
             let old_collapsed = prev_bm.max(old_top_margin);
@@ -267,50 +305,306 @@ impl FlowLayout {
             }
         }
 
-        // Shift subsequent items if position or height changed
-        if delta.abs() > 0.001 {
-            let mut found = false;
-            for item in &mut self.flow_order {
-                match item {
-                    FlowItem::Block {
-                        block_id: id,
-                        y,
-                        height: _,
-                    } => {
-                        if found {
-                            *y += delta;
-                            if let Some(b) = self.blocks.get_mut(id) {
-                                b.y += delta;
-                            }
-                        }
-                        if *id == block_id {
-                            found = true;
+        self.shift_items_after_block(block_id, delta);
+    }
+
+    /// Relayout a block inside a table cell. Recomputes the row height
+    /// and propagates any table height delta to subsequent flow items.
+    fn relayout_table_block(
+        &mut self,
+        registry: &FontRegistry,
+        params: &BlockLayoutParams,
+        table_id: usize,
+        row: usize,
+        col: usize,
+    ) {
+        let table = match self.tables.get_mut(&table_id) {
+            Some(t) => t,
+            None => return,
+        };
+
+        let cell_width = table
+            .column_content_widths
+            .get(col)
+            .copied()
+            .unwrap_or(200.0);
+        let old_table_height = table.total_height;
+
+        // Find the cell and replace the block
+        let cell = match table
+            .cell_layouts
+            .iter_mut()
+            .find(|c| c.row == row && c.column == col)
+        {
+            Some(c) => c,
+            None => return,
+        };
+
+        let new_block = layout_block(registry, params, cell_width);
+        if let Some(old) = cell.blocks.iter_mut().find(|b| b.block_id == params.block_id) {
+            *old = new_block;
+        }
+
+        // Reposition blocks within the cell and recompute cell height
+        let mut block_y = 0.0f32;
+        for block in &mut cell.blocks {
+            block.y = block_y;
+            block_y += block.height;
+        }
+        let cell_height = block_y;
+
+        // Recompute row height by scanning all cells in this row
+        if row < table.row_heights.len() {
+            let mut max_h = 0.0f32;
+            for c in &table.cell_layouts {
+                if c.row == row {
+                    let h: f32 = c.blocks.iter().map(|b| b.height).sum();
+                    max_h = max_h.max(h);
+                }
+            }
+            // Also consider the cell we just updated
+            max_h = max_h.max(cell_height);
+            table.row_heights[row] = max_h;
+        }
+
+        // Recompute row y positions and total height
+        let border = table.border_width;
+        let padding = table.cell_padding;
+        let spacing = if table.row_ys.len() > 1 {
+            // Infer spacing from existing layout
+            if table.row_ys.len() >= 2 && !table.row_heights.is_empty() {
+                let expected = table.row_ys[0] + padding + table.row_heights[0] + padding;
+                (table.row_ys.get(1).copied().unwrap_or(expected) - expected + padding).max(0.0)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let mut y = border;
+        for (r, &row_h) in table.row_heights.iter().enumerate() {
+            if r < table.row_ys.len() {
+                table.row_ys[r] = y + padding;
+            }
+            y += padding * 2.0 + row_h;
+            if r < table.row_heights.len() - 1 {
+                y += spacing;
+            }
+        }
+        table.total_height = y + border;
+
+        let delta = table.total_height - old_table_height;
+
+        // Update flow_order entry for this table
+        for item in &mut self.flow_order {
+            if let FlowItem::Table {
+                table_id: id,
+                height,
+                ..
+            } = item
+                && *id == table_id
+            {
+                *height = table.total_height;
+                break;
+            }
+        }
+
+        self.shift_items_after_table(table_id, delta);
+    }
+
+    /// Relayout a block inside a frame. Recomputes frame content height
+    /// and propagates any height delta to subsequent flow items.
+    fn relayout_frame_block(
+        &mut self,
+        registry: &FontRegistry,
+        params: &BlockLayoutParams,
+        frame_id: usize,
+    ) {
+        let frame = match self.frames.get_mut(&frame_id) {
+            Some(f) => f,
+            None => return,
+        };
+
+        let old_total_height = frame.total_height;
+        let old_content_height = frame.content_height;
+        let new_block = layout_block(registry, params, frame.content_width);
+
+        if let Some(old) = frame
+            .blocks
+            .iter_mut()
+            .find(|b| b.block_id == params.block_id)
+        {
+            *old = new_block;
+        }
+
+        // Reposition blocks within the frame
+        let mut content_y = 0.0f32;
+        for block in &mut frame.blocks {
+            block.y = content_y + block.top_margin;
+            let block_content = block.height - block.top_margin - block.bottom_margin;
+            content_y = block.y + block_content + block.bottom_margin;
+        }
+
+        frame.content_height = content_y;
+        // total_height changes by the same delta as content_height (chrome is fixed)
+        frame.total_height = old_total_height + (content_y - old_content_height);
+
+        let delta = frame.total_height - old_total_height;
+
+        for item in &mut self.flow_order {
+            if let FlowItem::Frame {
+                frame_id: id,
+                height,
+                ..
+            } = item
+                && *id == frame_id
+            {
+                *height = frame.total_height;
+                break;
+            }
+        }
+
+        self.shift_items_after_frame(frame_id, delta);
+    }
+
+    /// Shift all flow items after the given block by `delta` pixels.
+    fn shift_items_after_block(&mut self, block_id: usize, delta: f32) {
+        if delta.abs() <= 0.001 {
+            return;
+        }
+        let mut found = false;
+        for item in &mut self.flow_order {
+            match item {
+                FlowItem::Block {
+                    block_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(b) = self.blocks.get_mut(id) {
+                            b.y += delta;
                         }
                     }
-                    FlowItem::Table {
-                        table_id: id, y, ..
-                    } => {
-                        if found {
-                            *y += delta;
-                            if let Some(t) = self.tables.get_mut(id) {
-                                t.y += delta;
-                            }
+                    if *id == block_id {
+                        found = true;
+                    }
+                }
+                FlowItem::Table {
+                    table_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(t) = self.tables.get_mut(id) {
+                            t.y += delta;
                         }
                     }
-                    FlowItem::Frame {
-                        frame_id: id, y, ..
-                    } => {
-                        if found {
-                            *y += delta;
-                            if let Some(f) = self.frames.get_mut(id) {
-                                f.y += delta;
-                            }
+                }
+                FlowItem::Frame {
+                    frame_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(f) = self.frames.get_mut(id) {
+                            f.y += delta;
                         }
                     }
                 }
             }
-            self.content_height += delta;
         }
+        self.content_height += delta;
+    }
+
+    /// Shift all flow items after the given table by `delta` pixels.
+    fn shift_items_after_table(&mut self, table_id: usize, delta: f32) {
+        if delta.abs() <= 0.001 {
+            return;
+        }
+        let mut found = false;
+        for item in &mut self.flow_order {
+            match item {
+                FlowItem::Table {
+                    table_id: id, y, ..
+                } => {
+                    if *id == table_id {
+                        found = true;
+                        continue;
+                    }
+                    if found {
+                        *y += delta;
+                        if let Some(t) = self.tables.get_mut(id) {
+                            t.y += delta;
+                        }
+                    }
+                }
+                FlowItem::Block {
+                    block_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(b) = self.blocks.get_mut(id) {
+                            b.y += delta;
+                        }
+                    }
+                }
+                FlowItem::Frame {
+                    frame_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(f) = self.frames.get_mut(id) {
+                            f.y += delta;
+                        }
+                    }
+                }
+            }
+        }
+        self.content_height += delta;
+    }
+
+    /// Shift all flow items after the given frame by `delta` pixels.
+    fn shift_items_after_frame(&mut self, frame_id: usize, delta: f32) {
+        if delta.abs() <= 0.001 {
+            return;
+        }
+        let mut found = false;
+        for item in &mut self.flow_order {
+            match item {
+                FlowItem::Frame {
+                    frame_id: id, y, ..
+                } => {
+                    if *id == frame_id {
+                        found = true;
+                        continue;
+                    }
+                    if found {
+                        *y += delta;
+                        if let Some(f) = self.frames.get_mut(id) {
+                            f.y += delta;
+                        }
+                    }
+                }
+                FlowItem::Block {
+                    block_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(b) = self.blocks.get_mut(id) {
+                            b.y += delta;
+                        }
+                    }
+                }
+                FlowItem::Table {
+                    table_id: id, y, ..
+                } => {
+                    if found {
+                        *y += delta;
+                        if let Some(t) = self.tables.get_mut(id) {
+                            t.y += delta;
+                        }
+                    }
+                }
+            }
+        }
+        self.content_height += delta;
     }
 
     /// Update the cached max content width considering a single block's lines.
