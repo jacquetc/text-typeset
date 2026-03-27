@@ -76,9 +76,10 @@ pub fn convert_block(block: &BlockSnapshot) -> BlockLayoutParams {
     let indent_level = block.block_format.indent.unwrap_or(0) as f32;
 
     let (list_marker, list_indent) = if let Some(ref info) = block.list_info {
+        let list_indent_level = info.indent as f32;
         (
             info.marker.clone(),
-            DEFAULT_LIST_INDENT + indent_level * INDENT_PER_LEVEL,
+            DEFAULT_LIST_INDENT + list_indent_level * INDENT_PER_LEVEL,
         )
     } else {
         (String::new(), indent_level * INDENT_PER_LEVEL)

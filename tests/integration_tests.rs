@@ -1405,3 +1405,56 @@ fn repeated_enter_at_end_of_frame_stays_inside() {
         pos_final
     );
 }
+
+#[test]
+fn markdown_table_cells_render_at_distinct_positions() {
+    let doc = TextDocument::new();
+    let md = "\
+| Column A | Column B |
+|----------|----------|
+| Cell one | Cell two with **bold** |
+| Cell three | Cell four with `code` and *italic* |
+
+Final paragraph after all elements.";
+    let op = doc.set_markdown(md).unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    // The flow must contain a Table element (not a single concatenated block)
+    let table_count = flow
+        .elements
+        .iter()
+        .filter(|e| matches!(e, text_document::FlowElementSnapshot::Table(_)))
+        .count();
+    assert!(
+        table_count >= 1,
+        "markdown table should produce a Table flow element, got {} tables out of {} elements",
+        table_count,
+        flow.elements.len()
+    );
+
+    let mut ts = make_typesetter();
+    ts.layout_full(&flow);
+    let frame = ts.render();
+
+    // The table should produce border decorations
+    let table_borders = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::TableBorder)
+        .count();
+    assert!(
+        table_borders > 0,
+        "markdown table should produce table border decorations"
+    );
+
+    // Collect unique y positions - table rows + final paragraph need 4+ distinct y lines
+    let mut ys: Vec<f32> = frame.glyphs.iter().map(|g| g.screen[1]).collect();
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ys.dedup_by(|a, b| (*a - *b).abs() < 1.0);
+    assert!(
+        ys.len() >= 4,
+        "table rows + paragraph should produce 4+ distinct y lines, got {}",
+        ys.len()
+    );
+}
