@@ -1,6 +1,8 @@
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
+use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
-use text_typeset::{HitRegion, Typesetter, UnderlineStyle, VerticalAlignment};
+use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
+use text_typeset::{DecorationKind, HitRegion, Typesetter, UnderlineStyle, VerticalAlignment};
 
 const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
 
@@ -650,5 +652,144 @@ fn caret_rect_on_second_line() {
         "caret on second line ({}) should be below first line ({})",
         rect_line2[1],
         rect_line1[1]
+    );
+}
+
+// ── Table/frame helpers ────────────────────────────────────────
+
+fn make_block_at(id: usize, position: usize, text: &str) -> BlockLayoutParams {
+    BlockLayoutParams {
+        block_id: id,
+        position,
+        text: text.to_string(),
+        fragments: vec![FragmentParams {
+            text: text.to_string(),
+            offset: 0,
+            length: text.len(),
+            font_family: None,
+            font_weight: None,
+            font_bold: None,
+            font_italic: None,
+            font_point_size: None,
+            underline_style: UnderlineStyle::None,
+            overline: false,
+            strikeout: false,
+            is_link: false,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            foreground_color: None,
+            underline_color: None,
+            background_color: None,
+            anchor_href: None,
+            tooltip: None,
+            vertical_alignment: VerticalAlignment::Normal,
+        }],
+        alignment: Alignment::Left,
+        top_margin: 0.0,
+        bottom_margin: 0.0,
+        left_margin: 0.0,
+        right_margin: 0.0,
+        text_indent: 0.0,
+        list_marker: String::new(),
+        list_indent: 0.0,
+        tab_positions: vec![],
+        line_height_multiplier: None,
+        non_breakable_lines: false,
+        checkbox: None,
+        background_color: None,
+    }
+}
+
+fn make_cell_at(row: usize, col: usize, block_id: usize, position: usize, text: &str) -> CellLayoutParams {
+    CellLayoutParams {
+        row,
+        column: col,
+        blocks: vec![make_block_at(block_id, position, text)],
+        background_color: None,
+    }
+}
+
+// ── Selection in tables/frames ─────────────────────────────────
+
+#[test]
+fn selection_highlights_text_inside_table_cell() {
+    let mut ts = setup();
+    // Block 1: "AB" at position 0 (length 2, +1 separator = position 3 for table)
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    // Table with cell text "Hello" starting at document position 3
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![make_cell_at(0, 0, 100, 3, "Hello")],
+    });
+    // Select "Hello" (positions 3..8)
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: 8,
+        anchor: 3,
+        visible: true,
+    });
+    let block1_height = ts.block_visual_info(1).unwrap().height;
+    let frame = ts.render();
+
+    let sel_rects: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Selection)
+        .collect();
+    assert!(
+        !sel_rects.is_empty(),
+        "selection inside a table cell should produce selection rects"
+    );
+    // The selection rect y should be below the top-level block
+    for r in &sel_rects {
+        assert!(
+            r.rect[1] >= block1_height - 5.0,
+            "table selection rect y ({}) should be below block 1 (height {})",
+            r.rect[1],
+            block1_height
+        );
+    }
+}
+
+#[test]
+fn selection_highlights_text_inside_frame() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
+        blocks: vec![make_block_at(200, 3, "World")],
+        tables: vec![],
+    });
+    // Select "World" (positions 3..8)
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: 8,
+        anchor: 3,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let sel_rects: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Selection)
+        .collect();
+    assert!(
+        !sel_rects.is_empty(),
+        "selection inside a frame should produce selection rects"
     );
 }
