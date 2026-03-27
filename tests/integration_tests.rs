@@ -579,3 +579,168 @@ fn scroll_to_position_inside_blockquote() {
         "scroll_to_position inside blockquote should produce positive offset"
     );
 }
+
+// ── Nested blockquote (nested frame) integration tests ─────────
+
+#[test]
+fn caret_rect_inside_nested_blockquote() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("Before\n\n> Outer\n>\n> > Inner nested\n\nAfter\n")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find a position inside "Inner nested" via hit_test at approximate y
+    let h = ts.content_height();
+    // Scan vertically to find the inner block
+    let mut inner_pos = None;
+    for y_probe in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(80.0, y_probe as f32) {
+            let rect = ts.caret_rect(hit.position);
+            // Inner nested content should be indented more than outer
+            if rect[0] > 50.0 && rect[3] > 0.0 {
+                inner_pos = Some(hit.position);
+                break;
+            }
+        }
+    }
+    let pos = inner_pos.expect("should find a position inside nested blockquote");
+    let rect = ts.caret_rect(pos);
+    assert!(
+        rect[3] > 0.0,
+        "caret inside nested blockquote should have valid height"
+    );
+    assert!(
+        rect[1] > 0.0,
+        "caret y inside nested blockquote should be positive"
+    );
+}
+
+#[test]
+fn hit_test_inside_nested_blockquote_returns_inner_block() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("Before\n\n> Outer\n>\n> > Inner nested\n\nAfter\n")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find all distinct block_ids by scanning
+    let h = ts.content_height();
+    let mut block_ids = std::collections::HashSet::new();
+    for y_probe in (0..(h as i32)).step_by(3) {
+        if let Some(hit) = ts.hit_test(80.0, y_probe as f32) {
+            block_ids.insert(hit.block_id);
+        }
+    }
+    // Should have at least 4 blocks: Before, Outer, Inner nested, After
+    assert!(
+        block_ids.len() >= 4,
+        "should find at least 4 distinct blocks (got {}): {:?}",
+        block_ids.len(),
+        block_ids
+    );
+}
+
+#[test]
+fn selection_spanning_nested_blockquote() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("Before\n\n> Outer quote\n>\n> > Inner nested\n\nAfter\n")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find positions for "Outer" and "Inner" via hit test
+    let h = ts.content_height();
+    let mut positions = Vec::new();
+    for y_probe in (0..(h as i32)).step_by(3) {
+        if let Some(hit) = ts.hit_test(80.0, y_probe as f32) {
+            if positions.last().map_or(true, |&(_, last_bid)| last_bid != hit.block_id) {
+                positions.push((hit.position, hit.block_id));
+            }
+        }
+    }
+    assert!(
+        positions.len() >= 3,
+        "should find at least 3 distinct block positions (got {})",
+        positions.len()
+    );
+
+    let start = positions[0].0;
+    let end = positions.last().unwrap().0 + 3;
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: start,
+        anchor: end,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let sel_rects: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::Selection)
+        .collect();
+    assert!(
+        sel_rects.len() >= 2,
+        "selection spanning nested blockquote should produce multiple rects (got {})",
+        sel_rects.len()
+    );
+}
+
+#[test]
+fn caret_rect_after_edit_inside_nested_blockquote() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("Before\n\n> Outer\n>\n> > Short\n\nAfter\n")
+        .unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    ts.set_viewport(200.0, 600.0);
+
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find "After" position
+    let h = ts.content_height();
+    let after_hit = ts
+        .hit_test(10.0, h - 5.0)
+        .expect("should find After block");
+    let rect_before = ts.caret_rect(after_hit.position);
+
+    // Edit the nested blockquote to have longer text
+    let long_text = "Before\n\n> Outer\n>\n> > This is a much longer piece of text that should wrap and push the After block down significantly\n\nAfter\n";
+    let op = doc.set_markdown(long_text).unwrap();
+    op.wait().unwrap();
+    let flow2 = doc.snapshot_flow();
+    ts.layout_full(&flow2);
+    ts.render();
+
+    let h2 = ts.content_height();
+    let after_hit2 = ts
+        .hit_test(10.0, h2 - 5.0)
+        .expect("should find After block after edit");
+    let rect_after = ts.caret_rect(after_hit2.position);
+
+    assert!(
+        rect_after[1] > rect_before[1],
+        "caret for After should move down after nested blockquote grows: {} -> {}",
+        rect_before[1],
+        rect_after[1]
+    );
+}
