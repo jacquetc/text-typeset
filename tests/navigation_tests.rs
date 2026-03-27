@@ -17,26 +17,38 @@ use text_typeset::Typesetter;
 
 // ── Markdown document ──────────────────────────────────────────
 
-/// Rich document containing every element type.
+/// Rich document containing every element type with inline formatting.
 const RICH_MARKDOWN: &str = "\
-First paragraph with enough words to cause line wrapping at narrow viewport width easily.
+First paragraph with **bold words** and *italic words* and ~~strikethrough~~ and <u>underlined</u> and `inline code` wrapping at narrow viewport.
 
 - Bullet item one short
-- Bullet item two with enough text to wrap around the edge
+- Bullet item two with **bold** and *italic* text to wrap around the edge
+  - Nested bullet under item two
+  - Another nested bullet with enough words to wrap
+    - Third level nesting here
 
 1. Numbered first item
 2. Numbered second with longer text that also wraps at narrow width
+   1. Nested numbered item under two
+   2. Another nested numbered item
 
-> Blockquote paragraph with wrapping text inside the frame container element.
+> Blockquote paragraph with *italic* and **bold** wrapping text inside the frame.
 >
-> > Nested blockquote deeper inside with more text to wrap around.
+> > Nested blockquote deeper inside with ~~strikethrough~~ and more text to wrap around.
+
+```
+fn code_block_example() {
+    let x = 42;
+    println!(\"the answer is {}\", x);
+}
+```
 
 | Column A | Column B |
 |----------|----------|
-| Cell one | Cell two with enough text to wrap inside the cell |
-| Cell three | Cell four |
+| Cell one | Cell two with **bold** and enough text to wrap inside the cell |
+| Cell three | Cell four with `code` and *italic* |
 
-Final paragraph after all elements with wrapping text as well here.
+Final paragraph after all elements with <u>underlined words</u> and wrapping text as well here.
 ";
 
 // ── Local helpers ──────────────────────────────────────────────
