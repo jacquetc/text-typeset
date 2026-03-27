@@ -323,19 +323,6 @@ impl FlowLayout {
         }
     }
 
-    /// Recompute max content width from scratch (all blocks).
-    fn recompute_max_content_width(&mut self) {
-        self.cached_max_content_width = 0.0;
-        for block in self.blocks.values() {
-            for line in &block.lines {
-                let w = line.width + block.left_margin + block.right_margin;
-                if w > self.cached_max_content_width {
-                    self.cached_max_content_width = w;
-                }
-            }
-        }
-    }
-
     /// Find the bottom margin of the block immediately before `block_id` in flow order.
     fn prev_block_bottom_margin(&self, block_id: usize) -> Option<f32> {
         let mut prev_bm = None;

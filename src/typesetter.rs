@@ -462,8 +462,7 @@ impl Typesetter {
             let needed = (self.atlas.width * self.atlas.height * 4) as usize;
             self.render_frame.atlas_pixels.resize(needed, 0);
             let copy_len = needed.min(pixels.len());
-            self.render_frame.atlas_pixels[..copy_len]
-                .copy_from_slice(&pixels[..copy_len]);
+            self.render_frame.atlas_pixels[..copy_len].copy_from_slice(&pixels[..copy_len]);
             self.atlas.dirty = false;
         }
     }

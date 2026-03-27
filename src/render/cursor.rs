@@ -56,7 +56,11 @@ fn compute_selection_rects(
 
     for item in &flow.flow_order {
         let block_id = match item {
-            FlowItem::Block { block_id, y, height } => {
+            FlowItem::Block {
+                block_id,
+                y,
+                height,
+            } => {
                 // Viewport culling
                 if *y + *height < view_top {
                     continue;

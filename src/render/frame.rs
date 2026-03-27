@@ -136,7 +136,9 @@ pub fn build_render_frame(
                 0.0,
                 flow.viewport_width,
             );
-            render_frame.block_decorations.push((block_id, decos.clone()));
+            render_frame
+                .block_decorations
+                .push((block_id, decos.clone()));
             render_frame.decorations.extend(decos);
         }
     }
@@ -265,13 +267,21 @@ fn render_table_cells(
                 .get(cell.column)
                 .copied()
                 .unwrap_or(200.0);
-            let decos =
-                generate_block_decorations(block, registry, scroll_offset, viewport_height, cell_x, cell_y, cell_w);
+            let decos = generate_block_decorations(
+                block,
+                registry,
+                scroll_offset,
+                viewport_height,
+                cell_x,
+                cell_y,
+                cell_w,
+            );
             render_frame.decorations.extend(decos);
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_frame_layout(
     frame: &crate::layout::frame::FrameLayout,
     registry: &FontRegistry,

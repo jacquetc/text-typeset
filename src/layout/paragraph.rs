@@ -217,9 +217,7 @@ fn map_breaks_to_glyph_indices(
 
     for &(byte_offset, opportunity) in breaks {
         // Advance glyph cursor to the first glyph whose cluster >= byte_offset
-        while glyph_cursor < flat.len()
-            && (flat[glyph_cursor].cluster as usize) < byte_offset
-        {
+        while glyph_cursor < flat.len() && (flat[glyph_cursor].cluster as usize) < byte_offset {
             glyph_cursor += 1;
         }
         let glyph_idx = if glyph_cursor < flat.len() {

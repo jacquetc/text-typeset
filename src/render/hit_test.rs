@@ -116,9 +116,7 @@ fn find_block_at_y(flow: &FlowLayout, doc_y: f32) -> Option<(usize, &BlockLayout
     // Binary search: find the last item whose y <= doc_y
     let idx = flow.flow_order.partition_point(|item| {
         let y = match item {
-            FlowItem::Block { y, .. } | FlowItem::Table { y, .. } | FlowItem::Frame { y, .. } => {
-                *y
-            }
+            FlowItem::Block { y, .. } | FlowItem::Table { y, .. } | FlowItem::Frame { y, .. } => *y,
         };
         y <= doc_y
     });
@@ -132,13 +130,11 @@ fn find_block_at_y(flow: &FlowLayout, doc_y: f32) -> Option<(usize, &BlockLayout
             y,
             height,
         } = &flow.flow_order[i]
+            && doc_y >= *y
+            && doc_y < *y + *height
+            && let Some(block) = flow.blocks.get(block_id)
         {
-            if doc_y >= *y
-                && doc_y < *y + *height
-                && let Some(block) = flow.blocks.get(block_id)
-            {
-                return Some((*block_id, block));
-            }
+            return Some((*block_id, block));
         }
     }
 
