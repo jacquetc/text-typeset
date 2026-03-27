@@ -10,7 +10,7 @@
 //! - f32::INFINITY no-wrap
 
 mod helpers;
-use helpers::{assert_caret_is_real, assert_no_glyph_overlap, Rect, NOTO_SANS};
+use helpers::{NOTO_SANS, Rect, assert_caret_is_real, assert_no_glyph_overlap};
 
 use text_document::{MoveMode, MoveOperation, TextDocument};
 use text_typeset::Typesetter;
@@ -110,7 +110,6 @@ fn visual_move_down(
     None
 }
 
-
 // ── Phase implementations ──────────────────────────────────────
 
 /// Phase 1: Walk right through the entire document, sample caret rects.
@@ -148,7 +147,9 @@ fn phase_horizontal_walk(doc: &TextDocument, ts: &mut Typesetter) {
                 assert!(
                     r.y() >= prev_rect.y() - 1.0,
                     "right-walk: y should not decrease when moving to new line at pos {}: prev_y={}, new_y={}",
-                    pos, prev_rect.y(), r.y()
+                    pos,
+                    prev_rect.y(),
+                    r.y()
                 );
             }
             prev_rect = r;
@@ -192,11 +193,7 @@ fn phase_horizontal_walk(doc: &TextDocument, ts: &mut Typesetter) {
 /// Phase 2: Vertical walk using NextBlock/PreviousBlock. At each block, move
 /// to position 1 (second character) and verify caret_rect is valid with
 /// increasing y as we go down, decreasing y as we go up.
-fn phase_vertical_block_walk(
-    doc: &TextDocument,
-    ts: &mut Typesetter,
-    line_height: f32,
-) {
+fn phase_vertical_block_walk(doc: &TextDocument, ts: &mut Typesetter, line_height: f32) {
     let cursor = doc.cursor();
     cursor.set_position(0, MoveMode::MoveAnchor);
 
@@ -228,7 +225,10 @@ fn phase_vertical_block_walk(
         }
 
         let rect = ts.caret_rect(pos);
-        assert_caret_is_real(rect, &format!("block-down[{}] char 1 (pos {})", down_blocks, pos));
+        assert_caret_is_real(
+            rect,
+            &format!("block-down[{}] char 1 (pos {})", down_blocks, pos),
+        );
 
         // Block char 1 y should be >= previous block's y
         assert!(
@@ -275,7 +275,10 @@ fn phase_vertical_block_walk(
         }
 
         let rect = ts.caret_rect(pos);
-        assert_caret_is_real(rect, &format!("block-up[{}] char 1 (pos {})", up_blocks, pos));
+        assert_caret_is_real(
+            rect,
+            &format!("block-up[{}] char 1 (pos {})", up_blocks, pos),
+        );
 
         assert!(
             rect[1] <= current_y + 1.0,
@@ -339,7 +342,10 @@ fn phase_boundary_crossing(doc: &TextDocument, ts: &mut Typesetter) {
         let rect_start = ts.caret_rect(block_start);
         assert_caret_is_real(
             rect_start,
-            &format!("boundary block[{}] start (pos {})", block_count, block_start),
+            &format!(
+                "boundary block[{}] start (pos {})",
+                block_count, block_start
+            ),
         );
 
         // Move to char 1 and verify
@@ -405,12 +411,29 @@ fn phase_boundary_crossing(doc: &TextDocument, ts: &mut Typesetter) {
     );
 }
 
+/// Check whether `cursor_pos` is visually inside a frame (blockquote).
+/// Frame-internal blocks have no entry in the top-level flow, so
+/// `block_visual_info` returns `None` for them.
+fn is_cursor_in_frame(ts: &mut Typesetter, cursor_pos: usize) -> bool {
+    let rect = ts.caret_rect(cursor_pos);
+    if rect[3] <= 0.0 {
+        return false; // sentinel caret
+    }
+    let hx = rect[0].max(1.0);
+    let hy = rect[1] + rect[3] * 0.5;
+    if let Some(hit) = ts.hit_test(hx, hy) {
+        // Frame-internal blocks return None from block_visual_info
+        ts.block_visual_info(hit.block_id).is_none()
+    } else {
+        false
+    }
+}
+
 /// Phase 4: Content modification at each container type.
 fn phase_content_modification(doc: &TextDocument, ts: &mut Typesetter) {
     let content_h = ts.content_height();
 
     // Find positions inside different containers by scanning vertically
-    // We'll collect (position, is_indented) to identify different container types
     let mut container_positions: Vec<usize> = Vec::new();
     let mut last_y = -100.0f32;
 
@@ -443,6 +466,9 @@ fn phase_content_modification(doc: &TextDocument, ts: &mut Typesetter) {
     for (i, &pos) in positions.iter().enumerate() {
         let label = format!("container[{}] pos={}", i, pos);
 
+        // Record container type before the edit
+        let was_in_frame = is_cursor_in_frame(ts, pos);
+
         // Record caret before
         let rect_before = ts.caret_rect(pos);
         assert_caret_is_real(rect_before, &format!("{} before", label));
@@ -466,47 +492,85 @@ fn phase_content_modification(doc: &TextDocument, ts: &mut Typesetter) {
             rect_after
         );
 
+        // Container type must be preserved: if we were in a frame, we're still in a frame
+        if was_in_frame {
+            assert!(
+                is_cursor_in_frame(ts, pos_after),
+                "{}: cursor escaped frame after insert-X (pos {} -> {})",
+                label,
+                pos,
+                pos_after
+            );
+        }
+
         // Insert " word"
         cursor.insert_text(" word").unwrap();
         relayout_after_edit(doc, ts);
-        let rect2 = ts.caret_rect(cursor.position());
+        let pos_word = cursor.position();
+        let rect2 = ts.caret_rect(pos_word);
         assert_caret_is_real(rect2, &format!("{} after insert-word", label));
+
+        if was_in_frame {
+            assert!(
+                is_cursor_in_frame(ts, pos_word),
+                "{}: cursor escaped frame after insert-word (pos {})",
+                label,
+                pos_word
+            );
+        }
     }
 
     // Bulk insert: 10 words at the first container position
     if let Some(&first_pos) = positions.first() {
+        let was_in_frame = is_cursor_in_frame(ts, first_pos);
         cursor.set_position(first_pos, MoveMode::MoveAnchor);
         cursor
             .insert_text(" alpha bravo charlie delta echo foxtrot golf hotel india juliet")
             .unwrap();
         relayout_after_edit(doc, ts);
-        let rect = ts.caret_rect(cursor.position());
+        let pos_bulk = cursor.position();
+        let rect = ts.caret_rect(pos_bulk);
         assert_caret_is_real(rect, "after 10-word insert");
+
+        if was_in_frame {
+            assert!(
+                is_cursor_in_frame(ts, pos_bulk),
+                "cursor escaped frame after 10-word insert (pos {})",
+                pos_bulk
+            );
+        }
     }
 
     // Enter key (insert_block) at the second container position
     if positions.len() >= 2 {
-        // Find current position of second container (positions shifted due to inserts)
-        // Just use current cursor position after moving to approximate area
         let approx_pos = positions[1] + 30; // offset for prior inserts
         let clamped = approx_pos.min(doc.character_count());
         cursor.set_position(clamped, MoveMode::MoveAnchor);
 
+        let was_in_frame = is_cursor_in_frame(ts, cursor.position());
         let y_before = ts.caret_rect(cursor.position())[1];
 
         cursor.insert_block().unwrap();
         relayout_after_edit(doc, ts);
 
-        let rect_after = ts.caret_rect(cursor.position());
+        let pos_enter = cursor.position();
+        let rect_after = ts.caret_rect(pos_enter);
         assert_caret_is_real(rect_after, "after insert_block (enter key)");
 
-        // Caret y should have increased (moved to new line)
         assert!(
             rect_after[1] >= y_before - 1.0,
             "caret should move down after Enter: y_before={}, y_after={}",
             y_before,
             rect_after[1]
         );
+
+        if was_in_frame {
+            assert!(
+                is_cursor_in_frame(ts, pos_enter),
+                "cursor escaped frame after insert_block (pos {})",
+                pos_enter
+            );
+        }
 
         // Insert text on the new line
         cursor.insert_text("New line content here").unwrap();
@@ -515,17 +579,121 @@ fn phase_content_modification(doc: &TextDocument, ts: &mut Typesetter) {
         assert_caret_is_real(rect, "after text on new line");
     }
 
+    // ── Repeated Enter+char at end of every frame block ────────
+    // This catches bugs where insert_block at the end of the last block
+    // in a frame escapes to the next top-level block.
+    phase_repeated_enter_in_frames(doc, ts);
+
     // Verify no glyph overlap after all modifications
     let frame = ts.render();
     assert_no_glyph_overlap(frame);
 }
 
+/// Sub-phase: find every frame-internal block, move to its end, and do
+/// repeated Enter+char cycles. After each Enter, the cursor must still
+/// be inside a frame.
+fn phase_repeated_enter_in_frames(doc: &TextDocument, ts: &mut Typesetter) {
+    // Re-snapshot to get a clean state after prior edits
+    relayout_after_edit(doc, ts);
+
+    let content_h = ts.content_height();
+    let cursor = doc.cursor();
+
+    // Collect all frame-internal block positions by scanning for hits where
+    // block_visual_info returns None
+    let mut frame_positions: Vec<usize> = Vec::new();
+    let mut seen_blocks: Vec<usize> = Vec::new();
+
+    for y_step in (0..(content_h as i32)).step_by(4) {
+        if let Some(hit) = ts.hit_test(60.0, y_step as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+            && !seen_blocks.contains(&hit.block_id)
+        {
+            seen_blocks.push(hit.block_id);
+            frame_positions.push(hit.position);
+        }
+    }
+
+    if frame_positions.is_empty() {
+        return; // no frames in document (shouldn't happen with our rich doc)
+    }
+
+    // For each frame block, move to the end and do Enter+char 5 times
+    for (fi, &frame_pos) in frame_positions.iter().enumerate() {
+        // Move to end of this block
+        cursor.set_position(frame_pos, MoveMode::MoveAnchor);
+        cursor.move_position(MoveOperation::End, MoveMode::MoveAnchor, 1);
+
+        // End might have moved past the frame (to the next block).
+        // Use NextBlock-1 approach: go to block start, then walk right to the end.
+        // Simpler: just use the position and check if we're still in a frame.
+        // If End moved us out, back up to frame_pos and walk right.
+        if !is_cursor_in_frame(ts, cursor.position()) {
+            cursor.set_position(frame_pos, MoveMode::MoveAnchor);
+            // Walk right until we leave the frame or hit end of block
+            loop {
+                let prev = cursor.position();
+                cursor.move_position(MoveOperation::NextCharacter, MoveMode::MoveAnchor, 1);
+                if cursor.position() == prev {
+                    break;
+                }
+                if !is_cursor_in_frame(ts, cursor.position()) {
+                    // Went past the frame, back up one
+                    cursor.set_position(prev, MoveMode::MoveAnchor);
+                    break;
+                }
+            }
+        }
+
+        let end_pos = cursor.position();
+        if !is_cursor_in_frame(ts, end_pos) {
+            continue; // can't find frame end, skip
+        }
+
+        let label = format!("frame_block[{}]", fi);
+
+        // Repeated Enter + char, 5 times
+        for round in 0..5 {
+            cursor.insert_block().unwrap();
+            relayout_after_edit(doc, ts);
+
+            let pos_after_enter = cursor.position();
+            assert_caret_is_real(
+                ts.caret_rect(pos_after_enter),
+                &format!("{} Enter #{}", label, round + 1),
+            );
+            assert!(
+                is_cursor_in_frame(ts, pos_after_enter),
+                "{}: cursor escaped frame after Enter #{} (pos {}). \
+                 insert_block at end of frame block should stay inside the frame.",
+                label,
+                round + 1,
+                pos_after_enter
+            );
+
+            // Insert a character
+            let ch = (b'a' + round as u8) as char;
+            cursor.insert_text(&ch.to_string()).unwrap();
+            relayout_after_edit(doc, ts);
+
+            let pos_after_char = cursor.position();
+            assert_caret_is_real(
+                ts.caret_rect(pos_after_char),
+                &format!("{} after '{}'", label, ch),
+            );
+            assert!(
+                is_cursor_in_frame(ts, pos_after_char),
+                "{}: cursor escaped frame after inserting '{}' (pos {})",
+                label,
+                ch,
+                pos_after_char
+            );
+        }
+    }
+}
+
 /// Phase 5: Re-run navigation phases on the now-modified document.
-fn phase_post_modification_navigation(
-    doc: &TextDocument,
-    ts: &mut Typesetter,
-    line_height: f32,
-) {
+fn phase_post_modification_navigation(doc: &TextDocument, ts: &mut Typesetter, line_height: f32) {
     // Re-render to ensure clean state
     relayout_after_edit(doc, ts);
 

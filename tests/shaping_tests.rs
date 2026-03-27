@@ -1,5 +1,5 @@
 mod helpers;
-use helpers::{make_typesetter, NOTO_SANS};
+use helpers::{NOTO_SANS, make_typesetter};
 
 use text_typeset::Typesetter;
 

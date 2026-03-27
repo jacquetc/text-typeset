@@ -2,7 +2,7 @@
 //! These tests verify the full pipeline: TextDocument -> FlowSnapshot -> Typesetter -> RenderFrame.
 
 mod helpers;
-use helpers::{assert_caret_is_real, assert_no_glyph_overlap, make_typesetter, NOTO_SANS};
+use helpers::{NOTO_SANS, assert_caret_is_real, assert_no_glyph_overlap, make_typesetter};
 
 use text_document::TextDocument;
 use text_typeset::Typesetter;
@@ -1265,7 +1265,6 @@ fn caret_rect_stays_in_frame_after_insert() {
 /// 3. BUG: after the 4th Enter, cursor jumps outside the frame to the
 ///    start of the next top-level block.
 #[test]
-#[ignore = "text-document bug: insert_block at end of frame escapes to next top-level block"]
 fn repeated_enter_at_end_of_frame_stays_inside() {
     let doc = TextDocument::new();
     let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
@@ -1302,11 +1301,7 @@ fn repeated_enter_at_end_of_frame_stays_inside() {
     /// Check that the cursor is inside the frame by doing a hit_test at the
     /// caret position and verifying the hit block has no block_visual_info
     /// (frame-internal blocks are not in the top-level flow).
-    fn assert_cursor_in_frame(
-        ts: &mut Typesetter,
-        cursor_pos: usize,
-        label: &str,
-    ) {
+    fn assert_cursor_in_frame(ts: &mut Typesetter, cursor_pos: usize, label: &str) {
         let rect = ts.caret_rect(cursor_pos);
         assert_caret_is_real(rect, label);
 
@@ -1391,8 +1386,7 @@ fn repeated_enter_at_end_of_frame_stays_inside() {
         if let text_document::FlowElementSnapshot::Frame(f) = elem {
             f.elements.iter().any(|inner| {
                 if let text_document::FlowElementSnapshot::Block(b) = inner {
-                    b.position <= pos_final
-                        && pos_final <= b.position + b.text.chars().count()
+                    b.position <= pos_final && pos_final <= b.position + b.text.chars().count()
                 } else {
                     false
                 }

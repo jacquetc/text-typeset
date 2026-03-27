@@ -1,5 +1,5 @@
 mod helpers;
-use helpers::{assert_no_glyph_overlap, make_block, make_cell, make_typesetter, NOTO_SANS};
+use helpers::{NOTO_SANS, assert_no_glyph_overlap, make_block, make_cell, make_typesetter};
 
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
@@ -1119,7 +1119,7 @@ fn frame_renders_nested_block_glyphs() {
         padding: 8.0,
         border_width: 1.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Inside frame")],
+        blocks: vec![make_block(9000, "Inside frame")],
         tables: vec![],
         frames: vec![],
     });
@@ -1132,7 +1132,6 @@ fn frame_renders_nested_block_glyphs() {
     );
     assert_no_glyph_overlap(frame);
 }
-
 
 #[test]
 fn frame_contributes_to_content_height() {
@@ -1150,7 +1149,7 @@ fn frame_contributes_to_content_height() {
         padding: 8.0,
         border_width: 1.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Content")],
+        blocks: vec![make_block(9000, "Content")],
         tables: vec![],
         frames: vec![],
     });
@@ -1180,7 +1179,7 @@ fn block_then_frame_renders_frame_below() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Below")],
+        blocks: vec![make_block(9000, "Below")],
         tables: vec![],
         frames: vec![],
     });
@@ -1213,7 +1212,7 @@ fn frame_with_border_produces_decorations() {
         padding: 4.0,
         border_width: 2.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Bordered")],
+        blocks: vec![make_block(9000, "Bordered")],
         tables: vec![],
         frames: vec![],
     });
@@ -1247,7 +1246,7 @@ fn float_right_frame_positioned_at_right_edge() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Right")],
+        blocks: vec![make_block(9000, "Right")],
         tables: vec![],
         frames: vec![],
     });
@@ -1285,7 +1284,7 @@ fn absolute_frame_does_not_affect_content_height() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Floating")],
+        blocks: vec![make_block(9000, "Floating")],
         tables: vec![],
         frames: vec![],
     });
@@ -1628,7 +1627,7 @@ fn float_left_frame_renders() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"FloatL")],
+        blocks: vec![make_block(9000, "FloatL")],
         tables: vec![],
         frames: vec![],
     });
@@ -1767,7 +1766,7 @@ fn frame_with_nested_table_renders() {
         padding: 4.0,
         border_width: 1.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_block(9000,"Before table")],
+        blocks: vec![make_block(9000, "Before table")],
         tables: vec![(
             1,
             TableLayoutParams {

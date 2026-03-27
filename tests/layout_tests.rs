@@ -1,6 +1,7 @@
 mod helpers;
 use helpers::{assert_blocks_non_overlapping, make_block, make_block_at, make_typesetter};
 
+use text_typeset::Typesetter;
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::layout::block::layout_block;
 use text_typeset::layout::flow::FlowLayout;
@@ -8,7 +9,6 @@ use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosi
 use text_typeset::layout::paragraph::{Alignment, break_into_lines};
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::shaping::shaper::{font_metrics_px, shape_text};
-use text_typeset::Typesetter;
 
 /// Helper: shape text and break into lines with default settings.
 fn layout_text(
@@ -372,10 +372,7 @@ fn flow_layout_stacks_blocks_vertically() {
 fn flow_relayout_block_shifts_subsequent() {
     let ts = make_typesetter();
     let mut flow = FlowLayout::new();
-    let blocks = vec![
-        make_block(1, "Short."),
-        make_block(2, "After."),
-    ];
+    let blocks = vec![make_block(1, "Short."), make_block(2, "After.")];
     flow.layout_blocks(ts.font_registry(), blocks, 800.0);
 
     let y2_before = flow.blocks.get(&2).unwrap().y;
@@ -400,10 +397,7 @@ fn flow_relayout_block_shifts_subsequent() {
 fn flow_content_height_matches_blocks() {
     let ts = make_typesetter();
     let mut flow = FlowLayout::new();
-    let blocks = vec![
-        make_block(1, "First."),
-        make_block(2, "Second."),
-    ];
+    let blocks = vec![make_block(1, "First."), make_block(2, "Second.")];
     flow.layout_blocks(ts.font_registry(), blocks, 800.0);
 
     // Content height should be at least as tall as the sum of block heights

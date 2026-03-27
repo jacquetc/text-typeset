@@ -132,10 +132,7 @@ impl RenderFrameExt for RenderFrame {
     }
 
     fn decoration_count(&self, kind: DecorationKind) -> usize {
-        self.decorations
-            .iter()
-            .filter(|d| d.kind == kind)
-            .count()
+        self.decorations.iter().filter(|d| d.kind == kind).count()
     }
 }
 
@@ -152,8 +149,8 @@ pub fn assert_no_glyph_overlap(frame: &RenderFrame) {
                 continue;
             }
             // Compute overlap area
-            let ox = (rects[i].right().min(rects[j].right()) - rects[i].x().max(rects[j].x()))
-                .max(0.0);
+            let ox =
+                (rects[i].right().min(rects[j].right()) - rects[i].x().max(rects[j].x())).max(0.0);
             let oy = (rects[i].bottom().min(rects[j].bottom()) - rects[i].y().max(rects[j].y()))
                 .max(0.0);
             let overlap_area = ox * oy;
