@@ -443,7 +443,18 @@ fn find_block_at_y(flow: &FlowLayout, doc_y: f32) -> Option<(usize, &BlockLayout
         }
     }
 
-    // If below all blocks, return the last one
+    // Above all blocks: return the first one
+    if doc_y < 0.0 {
+        for item in &flow.flow_order {
+            if let FlowItem::Block { block_id, .. } = item
+                && let Some(block) = flow.blocks.get(block_id)
+            {
+                return Some((*block_id, block));
+            }
+        }
+    }
+
+    // Below all blocks: return the last one
     for item in flow.flow_order.iter().rev() {
         if let FlowItem::Block { block_id, .. } = item
             && let Some(block) = flow.blocks.get(block_id)

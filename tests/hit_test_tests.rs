@@ -495,6 +495,27 @@ fn hit_test_below_all_content() {
 }
 
 #[test]
+fn hit_test_above_all_content_returns_first_block() {
+    let mut ts = make_typesetter();
+    let mut b1 = make_block(1, "First");
+    b1.position = 0;
+    let mut b2 = make_block(2, "Last");
+    b2.position = 10;
+    ts.layout_blocks(vec![b1, b2]);
+
+    // Simulate page-up from near the top: screen y is negative enough
+    // that doc_y = y + scroll_offset < 0
+    let result = ts.hit_test(10.0, -500.0);
+    assert!(result.is_some(), "above-content hit test should return a result");
+    let hit = result.unwrap();
+    assert_eq!(
+        hit.block_id, 1,
+        "hit test above all content should return the first block, not the last (got block {})",
+        hit.block_id
+    );
+}
+
+#[test]
 fn caret_rect_at_end_of_document() {
     let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
