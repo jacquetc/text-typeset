@@ -1,18 +1,11 @@
 //! Functional tests using the real text-document API.
 //! These tests verify the full pipeline: TextDocument -> FlowSnapshot -> Typesetter -> RenderFrame.
 
+mod helpers;
+use helpers::{assert_caret_is_real, assert_no_glyph_overlap, make_typesetter, NOTO_SANS};
+
 use text_document::TextDocument;
 use text_typeset::Typesetter;
-
-const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
-
-fn setup_typesetter() -> Typesetter {
-    let mut ts = Typesetter::new();
-    let face = ts.register_font(NOTO_SANS);
-    ts.set_default_font(face, 16.0);
-    ts.set_viewport(800.0, 600.0);
-    ts
-}
 
 #[test]
 fn plain_text_document_renders_glyphs() {
@@ -20,7 +13,7 @@ fn plain_text_document_renders_glyphs() {
     doc.set_plain_text("Hello, world!").unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -30,6 +23,7 @@ fn plain_text_document_renders_glyphs() {
     );
     assert!(frame.atlas_dirty);
     assert!(frame.atlas_width > 0);
+    assert_no_glyph_overlap(frame);
 }
 
 #[test]
@@ -41,7 +35,7 @@ fn html_document_renders_glyphs() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -60,7 +54,7 @@ fn markdown_document_renders() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -81,7 +75,7 @@ fn multi_paragraph_document_has_increasing_y() {
         .unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -103,7 +97,7 @@ fn hit_test_on_document_returns_valid_position() {
     doc.set_plain_text("Hello world").unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let _ = ts.render();
 
@@ -124,7 +118,7 @@ fn cursor_and_selection_on_document() {
     doc.set_plain_text("Select this text.").unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
 
     // Set a selection spanning "this"
@@ -163,7 +157,7 @@ fn html_with_formatting_renders_decorations() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -185,7 +179,7 @@ fn document_with_table_renders() {
     cursor.insert_table(2, 2).unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -206,7 +200,7 @@ fn incremental_update_after_edit() {
     doc.set_plain_text("Short.").unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame1 = ts.render();
     let count1 = frame1.glyphs.len();
@@ -254,7 +248,7 @@ fn text_then_table_then_text_renders_all() {
 
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -285,7 +279,7 @@ fn heading_renders_larger_than_body() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -318,7 +312,7 @@ fn empty_document_renders_without_panic() {
     let doc = TextDocument::new();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     let frame = ts.render();
 
@@ -332,7 +326,7 @@ fn content_height_grows_with_content() {
     doc.set_plain_text("One line").unwrap();
     let flow1 = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow1);
     let h1 = ts.content_height();
 
@@ -362,7 +356,7 @@ fn hit_test_below_blockquote_lands_on_block_after() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     ts.render();
 
@@ -389,7 +383,7 @@ fn caret_rect_moves_through_blockquote() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     ts.render();
 
@@ -427,7 +421,7 @@ fn selection_spanning_blockquote_boundary() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
 
     // Select from "AB" through the blockquote into "EF"
@@ -513,6 +507,7 @@ fn caret_rect_after_edit_inside_blockquote() {
     assert!(after_hit.is_some(), "should find the After block");
     let after_pos = after_hit.unwrap().position;
     let rect_before_edit = ts.caret_rect(after_pos);
+    assert_caret_is_real(rect_before_edit, "After block before edit");
     assert!(
         rect_before_edit[3] > 0.0,
         "caret for 'After' should have valid height before edit"
@@ -537,6 +532,7 @@ fn caret_rect_after_edit_inside_blockquote() {
     );
     let after_pos2 = after_hit2.unwrap().position;
     let rect_after_edit = ts.caret_rect(after_pos2);
+    assert_caret_is_real(rect_after_edit, "After block after edit");
 
     assert!(
         rect_after_edit[3] > 0.0,
@@ -563,7 +559,7 @@ fn scroll_to_position_inside_blockquote() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     ts.render();
 
@@ -591,7 +587,7 @@ fn caret_rect_inside_nested_blockquote() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     ts.render();
 
@@ -630,7 +626,7 @@ fn hit_test_inside_nested_blockquote_returns_inner_block() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     ts.render();
 
@@ -660,7 +656,7 @@ fn selection_spanning_nested_blockquote() {
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.layout_full(&flow);
     ts.render();
 
@@ -711,7 +707,7 @@ fn caret_rect_after_edit_inside_nested_blockquote() {
         .unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.set_viewport(200.0, 600.0);
 
     let flow = doc.snapshot_flow();
@@ -722,6 +718,7 @@ fn caret_rect_after_edit_inside_nested_blockquote() {
     let h = ts.content_height();
     let after_hit = ts.hit_test(10.0, h - 5.0).expect("should find After block");
     let rect_before = ts.caret_rect(after_hit.position);
+    assert_caret_is_real(rect_before, "After block before nested bq edit");
 
     // Edit the nested blockquote to have longer text
     let long_text = "Before\n\n> Outer\n>\n> > This is a much longer piece of text that should wrap and push the After block down significantly\n\nAfter\n";
@@ -736,6 +733,7 @@ fn caret_rect_after_edit_inside_nested_blockquote() {
         .hit_test(10.0, h2 - 5.0)
         .expect("should find After block after edit");
     let rect_after = ts.caret_rect(after_hit2.position);
+    assert_caret_is_real(rect_after, "After block after nested bq edit");
 
     assert!(
         rect_after[1] > rect_before[1],
@@ -753,7 +751,7 @@ fn incremental_relayout_blockquote_shows_new_glyph() {
     let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
     let frame1 = ts.render();
@@ -805,7 +803,7 @@ fn render_block_only_for_frame_block_shows_new_glyph() {
     let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
     let frame1 = ts.render();
@@ -865,7 +863,7 @@ fn cursor_reaches_all_positions_in_frame_block_after_insert() {
     let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
     ts.render();
@@ -987,7 +985,7 @@ fn frame_block_wrapping_after_insert_grows_frame() {
     let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.set_viewport(200.0, 600.0); // narrow: makes wrapping likely
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
@@ -1063,7 +1061,7 @@ fn frame_block_relayout_preserves_line_structure() {
     let op = doc.set_markdown(&md).unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.set_viewport(200.0, 600.0);
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
@@ -1128,7 +1126,7 @@ fn render_block_only_frame_grows_on_wrap() {
     let op = doc.set_markdown("X\n\n> Hello\n\nY\n").unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     ts.set_viewport(200.0, 600.0);
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
@@ -1193,7 +1191,7 @@ fn caret_rect_stays_in_frame_after_insert() {
     let op = doc.set_markdown("X\n\n> Hello\n\nY\n").unwrap();
     op.wait().unwrap();
 
-    let mut ts = setup_typesetter();
+    let mut ts = make_typesetter();
     let flow = doc.snapshot_flow();
     ts.layout_full(&flow);
     ts.render();

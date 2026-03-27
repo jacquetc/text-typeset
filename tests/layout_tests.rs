@@ -1,20 +1,14 @@
+mod helpers;
+use helpers::{assert_blocks_non_overlapping, make_block, make_block_at, make_typesetter};
+
 use text_typeset::font::resolve::resolve_font;
-use text_typeset::layout::block::{BlockLayoutParams, FragmentParams, layout_block};
+use text_typeset::layout::block::layout_block;
 use text_typeset::layout::flow::FlowLayout;
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::{Alignment, break_into_lines};
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::shaping::shaper::{font_metrics_px, shape_text};
-use text_typeset::{Typesetter, UnderlineStyle, VerticalAlignment};
-
-const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
-
-fn setup() -> Typesetter {
-    let mut ts = Typesetter::new();
-    let face = ts.register_font(NOTO_SANS);
-    ts.set_default_font(face, 16.0);
-    ts
-}
+use text_typeset::Typesetter;
 
 /// Helper: shape text and break into lines with default settings.
 fn layout_text(
@@ -31,7 +25,7 @@ fn layout_text(
 
 #[test]
 fn single_word_fits_in_one_line() {
-    let ts = setup();
+    let ts = make_typesetter();
     let lines = layout_text(&ts, "Hello", 800.0, Alignment::Left);
     assert_eq!(lines.len(), 1, "short text should fit on one line");
     assert!(lines[0].width > 0.0);
@@ -39,7 +33,7 @@ fn single_word_fits_in_one_line() {
 
 #[test]
 fn long_text_wraps_to_multiple_lines() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "The quick brown fox jumps over the lazy dog. This sentence is long enough to wrap at a reasonable width.";
     let lines = layout_text(&ts, text, 200.0, Alignment::Left);
     assert!(
@@ -51,7 +45,7 @@ fn long_text_wraps_to_multiple_lines() {
 
 #[test]
 fn narrow_width_produces_more_lines() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Hello world, this is a test of line breaking.";
     let wide = layout_text(&ts, text, 800.0, Alignment::Left);
     let narrow = layout_text(&ts, text, 100.0, Alignment::Left);
@@ -65,7 +59,7 @@ fn narrow_width_produces_more_lines() {
 
 #[test]
 fn empty_text_produces_one_empty_line() {
-    let ts = setup();
+    let ts = make_typesetter();
     let lines = layout_text(&ts, "", 800.0, Alignment::Left);
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].runs.len(), 0);
@@ -77,7 +71,7 @@ fn empty_text_produces_one_empty_line() {
 
 #[test]
 fn line_widths_do_not_exceed_available_width() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Word after word after word after word after word after word.";
     let available = 200.0;
     let lines = layout_text(&ts, text, available, Alignment::Left);
@@ -95,7 +89,7 @@ fn line_widths_do_not_exceed_available_width() {
 
 #[test]
 fn right_alignment_shifts_runs() {
-    let ts = setup();
+    let ts = make_typesetter();
     let lines = layout_text(&ts, "Hi", 800.0, Alignment::Right);
     assert_eq!(lines.len(), 1);
     // The first run's x should be close to (800 - text_width)
@@ -112,7 +106,7 @@ fn right_alignment_shifts_runs() {
 
 #[test]
 fn center_alignment_shifts_runs() {
-    let ts = setup();
+    let ts = make_typesetter();
     let lines = layout_text(&ts, "Hi", 800.0, Alignment::Center);
     assert_eq!(lines.len(), 1);
     if let Some(first_run) = lines[0].runs.first() {
@@ -128,7 +122,7 @@ fn center_alignment_shifts_runs() {
 
 #[test]
 fn justify_alignment_fills_line_width() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Word after word after word after word after word end.";
     let lines = layout_text(&ts, text, 300.0, Alignment::Justify);
 
@@ -150,7 +144,7 @@ fn justify_alignment_fills_line_width() {
 
 #[test]
 fn justify_alignment_works_with_multibyte_text() {
-    let ts = setup();
+    let ts = make_typesetter();
     // Text with multibyte characters before spaces. If justify_line uses
     // char offsets as byte offsets to find spaces, the indices will be wrong
     // for text where byte offset != char offset.
@@ -173,7 +167,7 @@ fn justify_alignment_works_with_multibyte_text() {
 
 #[test]
 fn lines_have_positive_height() {
-    let ts = setup();
+    let ts = make_typesetter();
     let lines = layout_text(&ts, "Hello world", 800.0, Alignment::Left);
     for (i, line) in lines.iter().enumerate() {
         assert!(
@@ -189,7 +183,7 @@ fn lines_have_positive_height() {
 
 #[test]
 fn first_line_indent_reduces_available_space() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let text = "Word word word word word word word word word word word.";
     let run = shape_text(ts.font_registry(), &resolved, text, 0).unwrap();
@@ -217,7 +211,7 @@ fn first_line_indent_reduces_available_space() {
 
 #[test]
 fn mandatory_break_newline() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Line one\nLine two";
     let lines = layout_text(&ts, text, 800.0, Alignment::Left);
     assert!(
@@ -229,7 +223,7 @@ fn mandatory_break_newline() {
 
 #[test]
 fn all_glyphs_accounted_for_after_wrapping() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "The quick brown fox jumps over the lazy dog.";
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, text, 0).unwrap();
@@ -253,56 +247,10 @@ fn all_glyphs_accounted_for_after_wrapping() {
 
 // ── Block layout tests ──────────────────────────────────────────
 
-fn make_block_params(block_id: usize, text: &str) -> BlockLayoutParams {
-    BlockLayoutParams {
-        block_id,
-        position: 0,
-        text: text.to_string(),
-        fragments: vec![FragmentParams {
-            text: text.to_string(),
-            offset: 0,
-            length: text.len(),
-            font_family: None,
-            font_weight: None,
-            font_bold: None,
-            font_italic: None,
-            font_point_size: None,
-            underline_style: UnderlineStyle::None,
-            overline: false,
-            strikeout: false,
-            is_link: false,
-            letter_spacing: 0.0,
-            word_spacing: 0.0,
-            foreground_color: None,
-            underline_color: None,
-            background_color: None,
-            anchor_href: None,
-            tooltip: None,
-            vertical_alignment: VerticalAlignment::Normal,
-            image_name: None,
-            image_width: 0.0,
-            image_height: 0.0,
-        }],
-        alignment: Alignment::Left,
-        top_margin: 0.0,
-        bottom_margin: 0.0,
-        left_margin: 0.0,
-        right_margin: 0.0,
-        text_indent: 0.0,
-        list_marker: String::new(),
-        list_indent: 0.0,
-        tab_positions: vec![],
-        line_height_multiplier: None,
-        non_breakable_lines: false,
-        checkbox: None,
-        background_color: None,
-    }
-}
-
 #[test]
 fn block_layout_produces_lines() {
-    let ts = setup();
-    let params = make_block_params(1, "Hello world");
+    let ts = make_typesetter();
+    let params = make_block(1, "Hello world");
     let block = layout_block(ts.font_registry(), &params, 800.0);
 
     assert_eq!(block.block_id, 1);
@@ -315,8 +263,8 @@ fn block_layout_produces_lines() {
 
 #[test]
 fn block_layout_with_margins() {
-    let ts = setup();
-    let mut params = make_block_params(1, "Hello");
+    let ts = make_typesetter();
+    let mut params = make_block(1, "Hello");
     params.top_margin = 10.0;
     params.bottom_margin = 5.0;
 
@@ -334,13 +282,13 @@ fn block_layout_with_margins() {
 
 #[test]
 fn block_layout_respects_left_right_margins() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Word word word word word word word word word word.";
-    let mut params = make_block_params(1, text);
+    let mut params = make_block(1, text);
     params.left_margin = 50.0;
     params.right_margin = 50.0;
 
-    let wide = layout_block(ts.font_registry(), &make_block_params(2, text), 400.0);
+    let wide = layout_block(ts.font_registry(), &make_block(2, text), 400.0);
     let narrow = layout_block(ts.font_registry(), &params, 400.0);
 
     // With 100px total margins, there's less room for text = more lines
@@ -354,9 +302,9 @@ fn block_layout_respects_left_right_margins() {
 
 #[test]
 fn block_lines_have_increasing_y() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Line one. Line two. Line three. Line four. Line five.";
-    let params = make_block_params(1, text);
+    let params = make_block(1, text);
     let block = layout_block(ts.font_registry(), &params, 100.0);
 
     for i in 1..block.lines.len() {
@@ -375,12 +323,12 @@ fn block_lines_have_increasing_y() {
 
 #[test]
 fn flow_layout_stacks_blocks_vertically() {
-    let ts = setup();
+    let ts = make_typesetter();
     let mut flow = FlowLayout::new();
     let blocks = vec![
-        make_block_params(1, "First paragraph."),
-        make_block_params(2, "Second paragraph."),
-        make_block_params(3, "Third paragraph."),
+        make_block(1, "First paragraph."),
+        make_block(2, "Second paragraph."),
+        make_block(3, "Third paragraph."),
     ];
     flow.layout_blocks(ts.font_registry(), blocks, 800.0);
 
@@ -407,22 +355,33 @@ fn flow_layout_stacks_blocks_vertically() {
             ys[i - 1]
         );
     }
+
+    // Verify blocks don't overlap vertically
+    let block_bounds: Vec<(f32, f32)> = flow
+        .flow_order
+        .iter()
+        .filter_map(|item| match item {
+            text_typeset::layout::flow::FlowItem::Block { y, height, .. } => Some((*y, *height)),
+            _ => None,
+        })
+        .collect();
+    assert_blocks_non_overlapping(&block_bounds);
 }
 
 #[test]
 fn flow_relayout_block_shifts_subsequent() {
-    let ts = setup();
+    let ts = make_typesetter();
     let mut flow = FlowLayout::new();
     let blocks = vec![
-        make_block_params(1, "Short."),
-        make_block_params(2, "After."),
+        make_block(1, "Short."),
+        make_block(2, "After."),
     ];
     flow.layout_blocks(ts.font_registry(), blocks, 800.0);
 
     let y2_before = flow.blocks.get(&2).unwrap().y;
 
     // Replace first block with longer text that takes more lines
-    let longer = make_block_params(
+    let longer = make_block(
         1,
         "This is a much longer paragraph that will certainly wrap to multiple lines at a narrow width like one hundred pixels wide.",
     );
@@ -439,11 +398,11 @@ fn flow_relayout_block_shifts_subsequent() {
 
 #[test]
 fn flow_content_height_matches_blocks() {
-    let ts = setup();
+    let ts = make_typesetter();
     let mut flow = FlowLayout::new();
     let blocks = vec![
-        make_block_params(1, "First."),
-        make_block_params(2, "Second."),
+        make_block(1, "First."),
+        make_block(2, "Second."),
     ];
     flow.layout_blocks(ts.font_registry(), blocks, 800.0);
 
@@ -465,7 +424,7 @@ fn flow_content_height_matches_blocks() {
 
 #[test]
 fn emergency_break_on_long_word() {
-    let ts = setup();
+    let ts = make_typesetter();
     // A single very long "word" with no spaces — no break opportunities
     let text = "Supercalifragilisticexpialidocious";
     let lines = layout_text(&ts, text, 50.0, Alignment::Left);
@@ -493,11 +452,11 @@ fn emergency_break_on_long_word() {
 
 #[test]
 fn margin_collapsing_uses_max_not_sum() {
-    let ts = setup();
+    let ts = make_typesetter();
     let mut flow = FlowLayout::new();
-    let mut block1 = make_block_params(1, "First.");
+    let mut block1 = make_block(1, "First.");
     block1.bottom_margin = 20.0;
-    let mut block2 = make_block_params(2, "Second.");
+    let mut block2 = make_block(2, "Second.");
     block2.top_margin = 30.0;
 
     flow.layout_blocks(ts.font_registry(), vec![block1, block2], 800.0);
@@ -518,7 +477,7 @@ fn margin_collapsing_uses_max_not_sum() {
 
 #[test]
 fn text_indent_shifts_first_line() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let text = "Hello world, this is a test sentence for indentation.";
     let run = shape_text(ts.font_registry(), &resolved, text, 0).unwrap();
@@ -551,7 +510,7 @@ fn text_indent_shifts_first_line() {
 #[test]
 fn multi_fragment_all_glyphs_accounted() {
     // Verify no glyph loss when a paragraph has multiple formatting runs
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Bold Normal";
     let resolved_bold =
         resolve_font(ts.font_registry(), None, None, Some(true), None, None).unwrap();
@@ -589,7 +548,7 @@ fn multi_fragment_wrapping_breaks_at_correct_boundary() {
     // When two formatting runs produce text like "AAAA BBBB" at a narrow width,
     // the break should happen at the space between them — not at a wrong position
     // due to cluster values being in fragment-local space.
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "AAAA BBBB";
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
 
@@ -642,13 +601,13 @@ fn multi_fragment_wrapping_breaks_at_correct_boundary() {
 
 #[test]
 fn line_height_multiplier_increases_block_height() {
-    let ts = setup();
+    let ts = make_typesetter();
 
-    let mut normal = make_block_params(1, "Hello world");
+    let mut normal = make_block(1, "Hello world");
     normal.line_height_multiplier = None; // default 1.0
     let block_normal = layout_block(ts.font_registry(), &normal, 800.0);
 
-    let mut double = make_block_params(2, "Hello world");
+    let mut double = make_block(2, "Hello world");
     double.line_height_multiplier = Some(2.0);
     let block_double = layout_block(ts.font_registry(), &double, 800.0);
 
@@ -662,14 +621,14 @@ fn line_height_multiplier_increases_block_height() {
 
 #[test]
 fn non_breakable_lines_prevents_wrapping() {
-    let ts = setup();
+    let ts = make_typesetter();
 
     let text = "This is a long sentence that would normally wrap at a narrow width.";
 
-    let wrapping = make_block_params(1, text);
+    let wrapping = make_block(1, text);
     let block_wrap = layout_block(ts.font_registry(), &wrapping, 100.0);
 
-    let mut no_wrap = make_block_params(2, text);
+    let mut no_wrap = make_block(2, text);
     no_wrap.non_breakable_lines = true;
     let block_no_wrap = layout_block(ts.font_registry(), &no_wrap, 100.0);
 
@@ -686,9 +645,9 @@ fn non_breakable_lines_prevents_wrapping() {
 
 #[test]
 fn tab_stops_advance_to_next_position() {
-    let ts = setup();
+    let ts = make_typesetter();
 
-    let mut params = make_block_params(1, "A\tB");
+    let mut params = make_block(1, "A\tB");
     params.tab_positions = vec![100.0, 200.0, 300.0];
     let block = layout_block(ts.font_registry(), &params, 800.0);
 
@@ -706,9 +665,9 @@ fn tab_stops_advance_to_next_position() {
 
 #[test]
 fn checkbox_marker_renders() {
-    let ts = setup();
+    let ts = make_typesetter();
 
-    let mut params = make_block_params(1, "Todo item");
+    let mut params = make_block(1, "Todo item");
     params.checkbox = Some(false); // unchecked
     params.list_indent = 24.0;
     let block = layout_block(ts.font_registry(), &params, 800.0);
@@ -721,9 +680,9 @@ fn checkbox_marker_renders() {
 
 #[test]
 fn checked_checkbox_marker_renders() {
-    let ts = setup();
+    let ts = make_typesetter();
 
-    let mut params = make_block_params(1, "Done item");
+    let mut params = make_block(1, "Done item");
     params.checkbox = Some(true); // checked
     params.list_indent = 24.0;
     let block = layout_block(ts.font_registry(), &params, 800.0);
@@ -736,9 +695,9 @@ fn checked_checkbox_marker_renders() {
 
 #[test]
 fn background_color_stored_in_layout() {
-    let ts = setup();
+    let ts = make_typesetter();
 
-    let mut params = make_block_params(1, "Highlighted");
+    let mut params = make_block(1, "Highlighted");
     params.background_color = Some([1.0, 1.0, 0.0, 0.3]);
     let block = layout_block(ts.font_registry(), &params, 800.0);
 
@@ -753,7 +712,7 @@ fn background_color_stored_in_layout() {
 
 #[test]
 fn char_range_end_correct_for_ascii() {
-    let ts = setup();
+    let ts = make_typesetter();
     let text = "Hello";
     let lines = layout_text(&ts, text, 800.0, Alignment::Left);
     assert_eq!(lines.len(), 1);
@@ -767,7 +726,7 @@ fn char_range_end_correct_for_ascii() {
 
 #[test]
 fn char_range_end_correct_for_multibyte_utf8() {
-    let ts = setup();
+    let ts = make_typesetter();
     // Each character here is 2 bytes in UTF-8
     let text = "\u{00e9}\u{00e8}\u{00ea}"; // e-acute, e-grave, e-circumflex
     let lines = layout_text(&ts, text, 800.0, Alignment::Left);
@@ -785,12 +744,12 @@ fn char_range_end_correct_for_multibyte_utf8() {
 
 #[test]
 fn layout_blocks_matches_add_block_sequence() {
-    let ts = setup();
+    let ts = make_typesetter();
 
-    let mut b1 = make_block_params(1, "First paragraph.");
+    let mut b1 = make_block(1, "First paragraph.");
     b1.top_margin = 10.0;
     b1.bottom_margin = 20.0;
-    let mut b2 = make_block_params(2, "Second paragraph.");
+    let mut b2 = make_block(2, "Second paragraph.");
     b2.top_margin = 15.0;
     b2.bottom_margin = 5.0;
 
@@ -834,14 +793,14 @@ fn layout_blocks_matches_add_block_sequence() {
 
 #[test]
 fn relayout_block_handles_top_margin_change() {
-    let ts = setup();
+    let ts = make_typesetter();
     let mut flow = FlowLayout::new();
 
-    let mut b1 = make_block_params(1, "First.");
+    let mut b1 = make_block(1, "First.");
     b1.bottom_margin = 10.0;
-    let mut b2 = make_block_params(2, "Second.");
+    let mut b2 = make_block(2, "Second.");
     b2.top_margin = 5.0;
-    let b3 = make_block_params(3, "Third.");
+    let b3 = make_block(3, "Third.");
 
     flow.layout_blocks(
         ts.font_registry(),
@@ -853,7 +812,7 @@ fn relayout_block_handles_top_margin_change() {
     let y3_before = flow.blocks.get(&3).unwrap().y;
 
     // Increase block 2's top margin from 5 to 30
-    let mut b2_updated = make_block_params(2, "Second.");
+    let mut b2_updated = make_block(2, "Second.");
     b2_updated.top_margin = 30.0;
     flow.relayout_block(ts.font_registry(), &b2_updated, 800.0);
 
@@ -878,52 +837,6 @@ fn relayout_block_handles_top_margin_change() {
 }
 
 // ── Relayout in tables/frames ──────────────────────────────────
-
-fn make_block_at(id: usize, position: usize, text: &str) -> BlockLayoutParams {
-    BlockLayoutParams {
-        block_id: id,
-        position,
-        text: text.to_string(),
-        fragments: vec![FragmentParams {
-            text: text.to_string(),
-            offset: 0,
-            length: text.len(),
-            font_family: None,
-            font_weight: None,
-            font_bold: None,
-            font_italic: None,
-            font_point_size: None,
-            underline_style: UnderlineStyle::None,
-            overline: false,
-            strikeout: false,
-            is_link: false,
-            letter_spacing: 0.0,
-            word_spacing: 0.0,
-            foreground_color: None,
-            underline_color: None,
-            background_color: None,
-            anchor_href: None,
-            tooltip: None,
-            vertical_alignment: VerticalAlignment::Normal,
-            image_name: None,
-            image_width: 0.0,
-            image_height: 0.0,
-        }],
-        alignment: Alignment::Left,
-        top_margin: 0.0,
-        bottom_margin: 0.0,
-        left_margin: 0.0,
-        right_margin: 0.0,
-        text_indent: 0.0,
-        list_marker: String::new(),
-        list_indent: 0.0,
-        tab_positions: vec![],
-        line_height_multiplier: None,
-        non_breakable_lines: false,
-        checkbox: None,
-        background_color: None,
-    }
-}
 
 #[test]
 fn relayout_table_block_updates_table_height() {
@@ -1005,7 +918,7 @@ fn relayout_frame_block_updates_frame_height() {
 
 #[test]
 fn relayout_block_inside_nested_frame_updates_heights() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.set_viewport(200.0, 600.0);
 
     ts.layout_blocks(vec![make_block_at(1, 0, "Before")]);

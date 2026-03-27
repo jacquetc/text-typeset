@@ -1,68 +1,17 @@
+mod helpers;
+use helpers::{
+    assert_caret_is_real, make_block, make_block_at, make_cell_at, make_typesetter, NOTO_SANS,
+};
+
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
-use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
+use text_typeset::layout::table::TableLayoutParams;
 use text_typeset::{DecorationKind, HitRegion, Typesetter, UnderlineStyle, VerticalAlignment};
-
-const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
-
-fn setup() -> Typesetter {
-    let mut ts = Typesetter::new();
-    let face = ts.register_font(NOTO_SANS);
-    ts.set_default_font(face, 16.0);
-    ts.set_viewport(800.0, 600.0);
-    ts
-}
-
-fn make_block(id: usize, text: &str) -> BlockLayoutParams {
-    BlockLayoutParams {
-        block_id: id,
-        position: 0,
-        text: text.to_string(),
-        fragments: vec![FragmentParams {
-            text: text.to_string(),
-            offset: 0,
-            length: text.len(),
-            font_family: None,
-            font_weight: None,
-            font_bold: None,
-            font_italic: None,
-            font_point_size: None,
-            underline_style: UnderlineStyle::None,
-            overline: false,
-            strikeout: false,
-            is_link: false,
-            letter_spacing: 0.0,
-            word_spacing: 0.0,
-            foreground_color: None,
-            underline_color: None,
-            background_color: None,
-            anchor_href: None,
-            tooltip: None,
-            vertical_alignment: VerticalAlignment::Normal,
-            image_name: None,
-            image_width: 0.0,
-            image_height: 0.0,
-        }],
-        alignment: Alignment::Left,
-        top_margin: 0.0,
-        bottom_margin: 0.0,
-        left_margin: 0.0,
-        right_margin: 0.0,
-        text_indent: 0.0,
-        list_marker: String::new(),
-        list_indent: 0.0,
-        tab_positions: vec![],
-        line_height_multiplier: None,
-        non_breakable_lines: false,
-        checkbox: None,
-        background_color: None,
-    }
-}
 
 #[test]
 fn hit_test_on_text_returns_some() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello world")]);
     ts.render(); // ensure layout is computed
 
@@ -73,7 +22,7 @@ fn hit_test_on_text_returns_some() {
 
 #[test]
 fn hit_test_returns_correct_block_id() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "First"), make_block(2, "Second")]);
 
     // First block should be near y=0
@@ -90,7 +39,7 @@ fn hit_test_returns_correct_block_id() {
 
 #[test]
 fn hit_test_position_increases_left_to_right() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "ABCDEFGHIJ")]);
 
     let r_left = ts.hit_test(5.0, 10.0);
@@ -116,7 +65,7 @@ fn hit_test_position_increases_left_to_right() {
 
 #[test]
 fn hit_test_past_line_end() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hi")]);
 
     // Far to the right of a short line
@@ -132,7 +81,7 @@ fn hit_test_past_line_end() {
 
 #[test]
 fn hit_test_left_margin_region() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let mut block = make_block(1, "Hello");
     block.left_margin = 50.0;
     ts.layout_blocks(vec![block]);
@@ -148,10 +97,11 @@ fn hit_test_left_margin_region() {
 
 #[test]
 fn caret_rect_at_position_zero() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
 
     let rect = ts.caret_rect(0);
+    assert_caret_is_real(rect, "position 0");
     // Caret at position 0 should be near x=0
     assert!(
         rect[0] < 10.0,
@@ -164,12 +114,15 @@ fn caret_rect_at_position_zero() {
 
 #[test]
 fn caret_rect_moves_right_with_position() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "ABCDEF")]);
 
     let rect0 = ts.caret_rect(0);
     let rect3 = ts.caret_rect(3);
     let rect6 = ts.caret_rect(6);
+    assert_caret_is_real(rect0, "position 0");
+    assert_caret_is_real(rect3, "position 3");
+    assert_caret_is_real(rect6, "position 6");
 
     assert!(
         rect3[0] > rect0[0],
@@ -187,7 +140,7 @@ fn caret_rect_moves_right_with_position() {
 
 #[test]
 fn caret_rect_height_matches_line_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
 
     let rect = ts.caret_rect(0);
@@ -237,7 +190,7 @@ fn hit_test_with_scroll_offset() {
 
 #[test]
 fn cursor_produces_caret_decoration() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello world")]);
     ts.set_cursor(&text_typeset::CursorDisplay {
         position: 5,
@@ -258,7 +211,7 @@ fn cursor_produces_caret_decoration() {
 
 #[test]
 fn invisible_cursor_produces_no_caret() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     ts.set_cursor(&text_typeset::CursorDisplay {
         position: 3,
@@ -280,7 +233,7 @@ fn invisible_cursor_produces_no_caret() {
 
 #[test]
 fn selection_produces_highlight_rects() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello world")]);
     ts.set_cursor(&text_typeset::CursorDisplay {
         position: 0,
@@ -307,7 +260,7 @@ fn selection_produces_highlight_rects() {
 
 #[test]
 fn no_selection_when_anchor_equals_position() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     ts.set_cursor(&text_typeset::CursorDisplay {
         position: 3,
@@ -329,7 +282,7 @@ fn no_selection_when_anchor_equals_position() {
 
 #[test]
 fn multi_line_selection_extends_to_viewport_width() {
-    let mut ts = setup(); // 800x600
+    let mut ts = make_typesetter(); // 800x600
     ts.layout_blocks(vec![
         make_block(1, "Short line."),
         make_block(2, "Another line."),
@@ -367,7 +320,7 @@ fn multi_line_selection_extends_to_viewport_width() {
 
 #[test]
 fn single_line_selection_does_not_extend() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello world, this is text.")]);
     // Select just "world" — single line, doesn't continue to next line
     ts.set_cursor(&text_typeset::CursorDisplay {
@@ -396,7 +349,7 @@ fn single_line_selection_does_not_extend() {
 
 #[test]
 fn multiple_cursors() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "ABCDEFGHIJ")]);
     ts.set_cursors(&[
         text_typeset::CursorDisplay {
@@ -432,7 +385,7 @@ fn multiple_cursors() {
 
 #[test]
 fn block_visual_info_returns_data() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
 
     let info = ts.block_visual_info(1);
@@ -444,14 +397,14 @@ fn block_visual_info_returns_data() {
 
 #[test]
 fn block_visual_info_nonexistent_returns_none() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     assert!(ts.block_visual_info(999).is_none());
 }
 
 #[test]
 fn ensure_caret_visible_when_already_visible() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     ts.set_cursor(&text_typeset::CursorDisplay {
         position: 0,
@@ -504,7 +457,7 @@ fn ensure_caret_visible_scrolls_down_when_needed() {
 
 #[test]
 fn scroll_to_position_changes_offset() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let blocks: Vec<_> = (0..10)
         .map(|i| {
             let mut b = make_block(i, &format!("Paragraph {i}."));
@@ -525,7 +478,7 @@ fn scroll_to_position_changes_offset() {
 
 #[test]
 fn hit_test_below_all_content() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Short")]);
     // Click far below the single-line content
     let result = ts.hit_test(10.0, 500.0);
@@ -543,7 +496,7 @@ fn hit_test_below_all_content() {
 
 #[test]
 fn caret_rect_at_end_of_document() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     // Position past the last character
     let rect = ts.caret_rect(5);
@@ -555,7 +508,7 @@ fn caret_rect_at_end_of_document() {
 
 #[test]
 fn caret_rect_with_no_layout() {
-    let ts = setup();
+    let ts = make_typesetter();
     // No layout done — should return fallback
     let rect = ts.caret_rect(0);
     assert!(rect[3] > 0.0, "fallback caret should have positive height");
@@ -563,7 +516,7 @@ fn caret_rect_with_no_layout() {
 
 #[test]
 fn hit_test_between_blocks_below_content() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let mut block = make_block(1, "Short");
     block.top_margin = 0.0;
     block.bottom_margin = 100.0; // large gap after block
@@ -577,7 +530,7 @@ fn hit_test_between_blocks_below_content() {
 
 #[test]
 fn hit_test_link_region_detected() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     // Create a block where the text is marked as a link
     let block = BlockLayoutParams {
         block_id: 1,
@@ -638,7 +591,7 @@ fn hit_test_link_region_detected() {
 
 #[test]
 fn caret_rect_on_second_line() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(
         1,
         "First line that wraps to a second line at narrow width.",
@@ -661,74 +614,11 @@ fn caret_rect_on_second_line() {
     );
 }
 
-// ── Table/frame helpers ────────────────────────────────────────
-
-fn make_block_at(id: usize, position: usize, text: &str) -> BlockLayoutParams {
-    BlockLayoutParams {
-        block_id: id,
-        position,
-        text: text.to_string(),
-        fragments: vec![FragmentParams {
-            text: text.to_string(),
-            offset: 0,
-            length: text.len(),
-            font_family: None,
-            font_weight: None,
-            font_bold: None,
-            font_italic: None,
-            font_point_size: None,
-            underline_style: UnderlineStyle::None,
-            overline: false,
-            strikeout: false,
-            is_link: false,
-            letter_spacing: 0.0,
-            word_spacing: 0.0,
-            foreground_color: None,
-            underline_color: None,
-            background_color: None,
-            anchor_href: None,
-            tooltip: None,
-            vertical_alignment: VerticalAlignment::Normal,
-            image_name: None,
-            image_width: 0.0,
-            image_height: 0.0,
-        }],
-        alignment: Alignment::Left,
-        top_margin: 0.0,
-        bottom_margin: 0.0,
-        left_margin: 0.0,
-        right_margin: 0.0,
-        text_indent: 0.0,
-        list_marker: String::new(),
-        list_indent: 0.0,
-        tab_positions: vec![],
-        line_height_multiplier: None,
-        non_breakable_lines: false,
-        checkbox: None,
-        background_color: None,
-    }
-}
-
-fn make_cell_at(
-    row: usize,
-    col: usize,
-    block_id: usize,
-    position: usize,
-    text: &str,
-) -> CellLayoutParams {
-    CellLayoutParams {
-        row,
-        column: col,
-        blocks: vec![make_block_at(block_id, position, text)],
-        background_color: None,
-    }
-}
-
 // ── Selection in tables/frames ─────────────────────────────────
 
 #[test]
 fn selection_highlights_text_inside_table_cell() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     // Block 1: "AB" at position 0 (length 2, +1 separator = position 3 for table)
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     // Table with cell text "Hello" starting at document position 3
@@ -773,7 +663,7 @@ fn selection_highlights_text_inside_table_cell() {
 
 #[test]
 fn selection_highlights_text_inside_frame() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -825,7 +715,7 @@ fn selection_highlights_text_inside_frame() {
 
 #[test]
 fn hit_test_inside_table_cell_returns_correct_block() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     // Block at position 0, text "AB" (2 chars + separator = next pos 3)
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_table(&TableLayoutParams {
@@ -862,7 +752,7 @@ fn hit_test_inside_table_cell_returns_correct_block() {
 
 #[test]
 fn hit_test_returns_text_region_for_table_cell_content() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_table(&TableLayoutParams {
         table_id: 10,
@@ -890,7 +780,7 @@ fn hit_test_returns_text_region_for_table_cell_content() {
 
 #[test]
 fn caret_rect_inside_table_cell_has_valid_position() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_table(&TableLayoutParams {
         table_id: 10,
@@ -906,6 +796,7 @@ fn caret_rect_inside_table_cell_has_valid_position() {
 
     // Caret at position 3 (start of "Hello" in cell)
     let rect = ts.caret_rect(3);
+    assert_caret_is_real(rect, "position 3 inside table cell");
     let block1_info = ts.block_visual_info(1).unwrap();
     let table_top = block1_info.y + block1_info.height;
 
@@ -921,7 +812,7 @@ fn caret_rect_inside_table_cell_has_valid_position() {
 
 #[test]
 fn caret_rect_inside_table_advances_with_position() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_table(&TableLayoutParams {
         table_id: 10,
@@ -949,7 +840,7 @@ fn caret_rect_inside_table_advances_with_position() {
 
 #[test]
 fn hit_test_below_frame_content_does_not_stick_to_frame() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -989,7 +880,7 @@ fn hit_test_below_frame_content_does_not_stick_to_frame() {
 
 #[test]
 fn hit_test_inside_frame_returns_frame_block() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1031,7 +922,7 @@ fn hit_test_inside_frame_returns_frame_block() {
 
 #[test]
 fn hit_test_inside_frame_returns_text_region() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1065,7 +956,7 @@ fn hit_test_inside_frame_returns_text_region() {
 
 #[test]
 fn caret_rect_inside_frame_has_valid_position() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1087,6 +978,7 @@ fn caret_rect_inside_frame_has_valid_position() {
 
     // Caret at position 3 (start of "Hello" in frame)
     let rect = ts.caret_rect(3);
+    assert_caret_is_real(rect, "position 3 inside frame");
     let block1_info = ts.block_visual_info(1).unwrap();
     let frame_top = block1_info.y + block1_info.height;
 
@@ -1102,7 +994,7 @@ fn caret_rect_inside_frame_has_valid_position() {
 
 #[test]
 fn caret_rect_inside_frame_advances_with_position() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1136,7 +1028,7 @@ fn caret_rect_inside_frame_advances_with_position() {
 
 #[test]
 fn relayout_frame_block_renders_new_glyphs() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1183,7 +1075,7 @@ fn relayout_frame_block_renders_new_glyphs() {
 
 #[test]
 fn relayout_frame_block_caret_advances_correctly() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1236,7 +1128,7 @@ fn relayout_frame_block_caret_advances_correctly() {
 
 #[test]
 fn caret_rect_inside_nested_frame() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1276,6 +1168,7 @@ fn caret_rect_inside_nested_frame() {
 
     // Caret at position 9 (start of "Inner" in nested frame)
     let rect = ts.caret_rect(9);
+    assert_caret_is_real(rect, "position 9 inside nested frame");
     assert!(
         rect[3] > 0.0,
         "caret inside nested frame should have valid height (not fallback)"
@@ -1290,7 +1183,7 @@ fn caret_rect_inside_nested_frame() {
 
 #[test]
 fn hit_test_inside_nested_frame_returns_inner_block() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -1349,7 +1242,7 @@ fn hit_test_inside_nested_frame_returns_inner_block() {
 
 #[test]
 fn selection_inside_nested_frame() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,

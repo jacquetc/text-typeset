@@ -1,15 +1,8 @@
-use text_typeset::Typesetter;
+mod helpers;
+use helpers::make_typesetter;
+
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::shaping::shaper::shape_text;
-
-const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
-
-fn setup() -> Typesetter {
-    let mut ts = Typesetter::new();
-    let face = ts.register_font(NOTO_SANS);
-    ts.set_default_font(face, 16.0);
-    ts
-}
 
 // ── Atlas allocator tests ───────────────────────────────────────
 
@@ -142,7 +135,7 @@ mod rasterizer {
 
     #[test]
     fn rasterize_letter_a_produces_image() {
-        let ts = setup();
+        let ts = make_typesetter();
         let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
         let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
 
@@ -169,7 +162,7 @@ mod rasterizer {
 
     #[test]
     fn rasterized_glyph_has_nonzero_pixels() {
-        let ts = setup();
+        let ts = make_typesetter();
         let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
         let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
 
@@ -197,7 +190,7 @@ mod rasterizer {
 
     #[test]
     fn larger_size_produces_larger_glyph() {
-        let ts = setup();
+        let ts = make_typesetter();
         let resolved_small =
             resolve_font(ts.font_registry(), None, None, None, None, Some(12)).unwrap();
         let _resolved_large =
@@ -239,7 +232,7 @@ mod rasterizer {
 
     #[test]
     fn space_glyph_rasterizes_to_empty_or_none() {
-        let ts = setup();
+        let ts = make_typesetter();
         let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
         let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
 

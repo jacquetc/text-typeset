@@ -1,19 +1,14 @@
+mod helpers;
+use helpers::{make_typesetter, NOTO_SANS};
+
 use text_typeset::Typesetter;
+
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::shaping::shaper::{font_metrics_px, shape_text, shape_text_with_buffer};
 
-const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
-
-fn setup() -> Typesetter {
-    let mut ts = Typesetter::new();
-    let face = ts.register_font(NOTO_SANS);
-    ts.set_default_font(face, 16.0);
-    ts
-}
-
 #[test]
 fn shape_hello_produces_glyphs() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "Hello", 0).unwrap();
 
@@ -25,7 +20,7 @@ fn shape_hello_produces_glyphs() {
 
 #[test]
 fn shape_empty_string_produces_no_glyphs() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "", 0).unwrap();
     assert_eq!(run.glyphs.len(), 0);
@@ -34,7 +29,7 @@ fn shape_empty_string_produces_no_glyphs() {
 
 #[test]
 fn glyph_advances_are_positive() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "Test text", 0).unwrap();
 
@@ -52,7 +47,7 @@ fn glyph_advances_are_positive() {
 
 #[test]
 fn cluster_values_map_to_byte_offsets() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let text = "AB";
     let run = shape_text(ts.font_registry(), &resolved, text, 0).unwrap();
@@ -66,7 +61,7 @@ fn cluster_values_map_to_byte_offsets() {
 
 #[test]
 fn multibyte_utf8_clusters_are_correct() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     // 'é' is 2 bytes in UTF-8 (0xC3, 0xA9)
     let text = "Aé";
@@ -79,7 +74,7 @@ fn multibyte_utf8_clusters_are_correct() {
 
 #[test]
 fn text_offset_is_stored_in_run() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "Hi", 42).unwrap();
     assert_eq!(run.text_range, 42..44);
@@ -87,7 +82,7 @@ fn text_offset_is_stored_in_run() {
 
 #[test]
 fn larger_font_size_produces_larger_advances() {
-    let ts = setup();
+    let ts = make_typesetter();
     let small = resolve_font(ts.font_registry(), None, None, None, None, Some(12)).unwrap();
     let large = resolve_font(ts.font_registry(), None, None, None, None, Some(48)).unwrap();
 
@@ -104,7 +99,7 @@ fn larger_font_size_produces_larger_advances() {
 
 #[test]
 fn space_has_nonzero_advance() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, " ", 0).unwrap();
 
@@ -117,7 +112,7 @@ fn space_has_nonzero_advance() {
 
 #[test]
 fn font_metrics_are_reasonable() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let metrics = font_metrics_px(ts.font_registry(), &resolved).unwrap();
 
@@ -136,7 +131,7 @@ fn font_metrics_are_reasonable() {
 
 #[test]
 fn total_advance_matches_sum_of_glyphs() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "Hello world", 0).unwrap();
 
@@ -151,7 +146,7 @@ fn total_advance_matches_sum_of_glyphs() {
 
 #[test]
 fn no_notdef_glyphs_for_basic_latin() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(
         ts.font_registry(),
@@ -171,7 +166,7 @@ fn no_notdef_glyphs_for_basic_latin() {
 
 #[test]
 fn shape_with_buffer_recycling() {
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
 
     let buffer = rustybuzz::UnicodeBuffer::new();
@@ -234,7 +229,7 @@ fn bidi_mixed_produces_multiple_runs() {
 fn shape_rtl_text_produces_glyphs() {
     use text_typeset::shaping::shaper::{TextDirection, shape_text_directed};
 
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
 
     let run = shape_text_directed(
@@ -255,7 +250,7 @@ fn shape_rtl_text_produces_glyphs() {
 #[test]
 fn shape_text_with_fallback_no_notdef_for_basic_latin() {
     // With one font that covers Latin, shape_text should produce no .notdef
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "Hello", 0).unwrap();
     assert!(
@@ -290,7 +285,7 @@ fn shape_text_fallback_is_attempted_for_missing_glyphs() {
 fn shape_text_advance_recomputed_after_fallback() {
     // Even if fallback is attempted (even if no .notdef present),
     // advance_width should match the sum of glyph advances.
-    let ts = setup();
+    let ts = make_typesetter();
     let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
     let run = shape_text(ts.font_registry(), &resolved, "Hello world", 0).unwrap();
 

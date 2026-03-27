@@ -1,68 +1,15 @@
+mod helpers;
+use helpers::{assert_no_glyph_overlap, make_block, make_cell, make_typesetter, NOTO_SANS};
+
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::{DecorationKind, Typesetter, UnderlineStyle, VerticalAlignment};
 
-const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
-
-fn setup() -> Typesetter {
-    let mut ts = Typesetter::new();
-    let face = ts.register_font(NOTO_SANS);
-    ts.set_default_font(face, 16.0);
-    ts.set_viewport(800.0, 600.0);
-    ts
-}
-
-fn make_block(id: usize, text: &str) -> BlockLayoutParams {
-    BlockLayoutParams {
-        block_id: id,
-        position: 0,
-        text: text.to_string(),
-        fragments: vec![FragmentParams {
-            text: text.to_string(),
-            offset: 0,
-            length: text.len(),
-            font_family: None,
-            font_weight: None,
-            font_bold: None,
-            font_italic: None,
-            font_point_size: None,
-            underline_style: UnderlineStyle::None,
-            overline: false,
-            strikeout: false,
-            is_link: false,
-            letter_spacing: 0.0,
-            word_spacing: 0.0,
-            foreground_color: None,
-            underline_color: None,
-            background_color: None,
-            anchor_href: None,
-            tooltip: None,
-            vertical_alignment: VerticalAlignment::Normal,
-            image_name: None,
-            image_width: 0.0,
-            image_height: 0.0,
-        }],
-        alignment: Alignment::Left,
-        top_margin: 0.0,
-        bottom_margin: 0.0,
-        left_margin: 0.0,
-        right_margin: 0.0,
-        text_indent: 0.0,
-        list_marker: String::new(),
-        list_indent: 0.0,
-        tab_positions: vec![],
-        line_height_multiplier: None,
-        non_breakable_lines: false,
-        checkbox: None,
-        background_color: None,
-    }
-}
-
 #[test]
 fn full_pipeline_produces_glyph_quads() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello world")]);
     let frame = ts.render();
 
@@ -73,11 +20,12 @@ fn full_pipeline_produces_glyph_quads() {
     assert!(frame.atlas_width > 0);
     assert!(frame.atlas_height > 0);
     assert!(frame.atlas_dirty, "atlas should be dirty on first render");
+    assert_no_glyph_overlap(frame);
 }
 
 #[test]
 fn glyph_quads_have_valid_coordinates() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Test")]);
     let frame = ts.render();
 
@@ -105,7 +53,7 @@ fn glyph_quads_have_valid_coordinates() {
 
 #[test]
 fn atlas_pixels_contain_rasterized_data() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "A")]);
     let frame = ts.render();
 
@@ -120,7 +68,7 @@ fn atlas_pixels_contain_rasterized_data() {
 
 #[test]
 fn multiple_blocks_produce_distinct_y_positions() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![
         make_block(1, "First paragraph"),
         make_block(2, "Second paragraph"),
@@ -141,7 +89,7 @@ fn multiple_blocks_produce_distinct_y_positions() {
 
 #[test]
 fn second_render_atlas_not_dirty() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
 
     let _ = ts.render(); // first render — atlas gets built
@@ -190,14 +138,14 @@ fn viewport_culling_omits_offscreen_blocks() {
 
 #[test]
 fn content_height_is_positive_after_layout() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     assert!(ts.content_height() > 0.0);
 }
 
 #[test]
 fn relayout_block_updates_render() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Short."), make_block(2, "After.")]);
     let frame1 = ts.render();
     let count1 = frame1.glyphs.len();
@@ -260,7 +208,7 @@ fn relayout_block_updates_render() {
 
 #[test]
 fn blocks_with_margins_render_at_correct_y() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let mut block = make_block(1, "Hello");
     block.top_margin = 20.0;
     ts.layout_blocks(vec![block]);
@@ -288,7 +236,7 @@ fn blocks_with_margins_render_at_correct_y() {
 fn multi_fragment_block_renders_all_glyphs() {
     // Test with two fragments (different formatting) in one block.
     // This exercises the cross-run boundary in build_line.
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let text = "Hello world";
     let block = BlockLayoutParams {
         block_id: 1,
@@ -375,7 +323,7 @@ fn multi_fragment_block_renders_all_glyphs() {
 
 #[test]
 fn render_empty_document() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     let frame = ts.render();
     assert!(
@@ -388,7 +336,7 @@ fn render_empty_document() {
 
 #[test]
 fn glyph_x_positions_increase_left_to_right() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "ABCDEF")]);
     let frame = ts.render();
 
@@ -407,7 +355,7 @@ fn glyph_x_positions_increase_left_to_right() {
 
 #[test]
 fn underline_produces_decoration_rect() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let block = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -472,7 +420,7 @@ fn underline_produces_decoration_rect() {
 
 #[test]
 fn strikeout_produces_decoration_rect() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let block = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -532,7 +480,7 @@ fn strikeout_produces_decoration_rect() {
 
 #[test]
 fn no_decorations_for_plain_text() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "plain text")]);
     let frame = ts.render();
 
@@ -545,7 +493,7 @@ fn no_decorations_for_plain_text() {
 
 #[test]
 fn letter_spacing_increases_total_width() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
 
     // Normal text
     let normal = make_block(1, "Hello");
@@ -558,7 +506,7 @@ fn letter_spacing_increases_total_width() {
         .unwrap_or(0.0);
 
     // Same text with letter_spacing=5.0
-    let mut ts2 = setup();
+    let mut ts2 = make_typesetter();
     let spaced = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -620,14 +568,14 @@ fn letter_spacing_increases_total_width() {
 
 #[test]
 fn word_spacing_increases_gap_between_words() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
 
     // Normal
     let normal = make_block(1, "A B");
     ts.layout_blocks(vec![normal]);
     let frame_normal = ts.render();
 
-    let mut ts2 = setup();
+    let mut ts2 = make_typesetter();
     let spaced = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -732,7 +680,7 @@ fn scroll_offset_shifts_glyph_y() {
 
 #[test]
 fn list_marker_renders_extra_glyphs() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let block = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -790,7 +738,7 @@ fn list_marker_renders_extra_glyphs() {
 
 #[test]
 fn list_marker_positioned_left_of_content() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let block = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -853,7 +801,7 @@ fn list_marker_positioned_left_of_content() {
 
 #[test]
 fn list_indent_shifts_content_right() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
 
     // Block without list
     let plain = make_block(1, "Hello");
@@ -866,7 +814,7 @@ fn list_indent_shifts_content_right() {
         .unwrap_or(0.0);
 
     // Block with list indent
-    let mut ts2 = setup();
+    let mut ts2 = make_typesetter();
     let listed = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -933,60 +881,9 @@ fn list_indent_shifts_content_right() {
 
 // ── Table tests ─────────────────────────────────────────────────
 
-fn make_cell(row: usize, col: usize, text: &str) -> CellLayoutParams {
-    CellLayoutParams {
-        row,
-        column: col,
-        blocks: vec![BlockLayoutParams {
-            block_id: row * 100 + col,
-            position: 0,
-            text: text.to_string(),
-            fragments: vec![FragmentParams {
-                text: text.to_string(),
-                offset: 0,
-                length: text.len(),
-                font_family: None,
-                font_weight: None,
-                font_bold: None,
-                font_italic: None,
-                font_point_size: None,
-                underline_style: UnderlineStyle::None,
-                overline: false,
-                strikeout: false,
-                is_link: false,
-                letter_spacing: 0.0,
-                word_spacing: 0.0,
-                foreground_color: None,
-                underline_color: None,
-                background_color: None,
-                anchor_href: None,
-                tooltip: None,
-                vertical_alignment: VerticalAlignment::Normal,
-                image_name: None,
-                image_width: 0.0,
-                image_height: 0.0,
-            }],
-            alignment: Alignment::Left,
-            top_margin: 0.0,
-            bottom_margin: 0.0,
-            left_margin: 0.0,
-            right_margin: 0.0,
-            text_indent: 0.0,
-            list_marker: String::new(),
-            list_indent: 0.0,
-            tab_positions: vec![],
-            line_height_multiplier: None,
-            non_breakable_lines: false,
-            checkbox: None,
-            background_color: None,
-        }],
-        background_color: None,
-    }
-}
-
 #[test]
 fn table_renders_cell_glyphs() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]); // clear flow
     ts.add_table(&TableLayoutParams {
         table_id: 1,
@@ -1011,11 +908,12 @@ fn table_renders_cell_glyphs() {
         "2x2 table should render at least 4 glyphs, got {}",
         frame.glyphs.len()
     );
+    assert_no_glyph_overlap(frame);
 }
 
 #[test]
 fn table_produces_border_decorations() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_table(&TableLayoutParams {
         table_id: 1,
@@ -1047,7 +945,7 @@ fn table_produces_border_decorations() {
 
 #[test]
 fn table_cells_at_different_positions() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_table(&TableLayoutParams {
         table_id: 1,
@@ -1077,7 +975,7 @@ fn table_cells_at_different_positions() {
 
 #[test]
 fn table_has_positive_content_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_table(&TableLayoutParams {
         table_id: 1,
@@ -1102,7 +1000,7 @@ fn table_has_positive_content_height() {
 
 #[test]
 fn table_cell_background() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     let mut cell = make_cell(0, 0, "Highlighted");
     cell.background_color = Some([1.0, 1.0, 0.0, 0.3]); // yellow highlight
@@ -1131,7 +1029,7 @@ fn table_cell_background() {
 
 #[test]
 fn table_width_does_not_exceed_viewport() {
-    let mut ts = setup(); // viewport 800x600
+    let mut ts = make_typesetter(); // viewport 800x600
     ts.layout_blocks(vec![]);
     ts.add_table(&TableLayoutParams {
         table_id: 1,
@@ -1163,7 +1061,7 @@ fn table_width_does_not_exceed_viewport() {
 
 #[test]
 fn block_then_table_renders_table_below_block() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Above the table.")]);
 
     let block_height = ts.content_height();
@@ -1205,55 +1103,9 @@ fn block_then_table_renders_table_below_block() {
 
 // ── Frame tests ─────────────────────────────────────────────────
 
-fn make_frame_block(text: &str) -> BlockLayoutParams {
-    BlockLayoutParams {
-        block_id: 9000,
-        position: 0,
-        text: text.to_string(),
-        fragments: vec![FragmentParams {
-            text: text.to_string(),
-            offset: 0,
-            length: text.len(),
-            font_family: None,
-            font_weight: None,
-            font_bold: None,
-            font_italic: None,
-            font_point_size: None,
-            underline_style: UnderlineStyle::None,
-            overline: false,
-            strikeout: false,
-            is_link: false,
-            letter_spacing: 0.0,
-            word_spacing: 0.0,
-            foreground_color: None,
-            underline_color: None,
-            background_color: None,
-            anchor_href: None,
-            tooltip: None,
-            vertical_alignment: VerticalAlignment::Normal,
-            image_name: None,
-            image_width: 0.0,
-            image_height: 0.0,
-        }],
-        alignment: Alignment::Left,
-        top_margin: 0.0,
-        bottom_margin: 0.0,
-        left_margin: 0.0,
-        right_margin: 0.0,
-        text_indent: 0.0,
-        list_marker: String::new(),
-        list_indent: 0.0,
-        tab_positions: vec![],
-        line_height_multiplier: None,
-        non_breakable_lines: false,
-        checkbox: None,
-        background_color: None,
-    }
-}
-
 #[test]
 fn frame_renders_nested_block_glyphs() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1267,7 +1119,7 @@ fn frame_renders_nested_block_glyphs() {
         padding: 8.0,
         border_width: 1.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Inside frame")],
+        blocks: vec![make_block(9000,"Inside frame")],
         tables: vec![],
         frames: vec![],
     });
@@ -1278,11 +1130,13 @@ fn frame_renders_nested_block_glyphs() {
         "frame with 'Inside frame' should render glyphs, got {}",
         frame.glyphs.len()
     );
+    assert_no_glyph_overlap(frame);
 }
+
 
 #[test]
 fn frame_contributes_to_content_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1296,7 +1150,7 @@ fn frame_contributes_to_content_height() {
         padding: 8.0,
         border_width: 1.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Content")],
+        blocks: vec![make_block(9000,"Content")],
         tables: vec![],
         frames: vec![],
     });
@@ -1310,7 +1164,7 @@ fn frame_contributes_to_content_height() {
 
 #[test]
 fn block_then_frame_renders_frame_below() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Above")]);
     let block_h = ts.content_height();
 
@@ -1326,7 +1180,7 @@ fn block_then_frame_renders_frame_below() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Below")],
+        blocks: vec![make_block(9000,"Below")],
         tables: vec![],
         frames: vec![],
     });
@@ -1345,7 +1199,7 @@ fn block_then_frame_renders_frame_below() {
 
 #[test]
 fn frame_with_border_produces_decorations() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1359,7 +1213,7 @@ fn frame_with_border_produces_decorations() {
         padding: 4.0,
         border_width: 2.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Bordered")],
+        blocks: vec![make_block(9000,"Bordered")],
         tables: vec![],
         frames: vec![],
     });
@@ -1379,7 +1233,7 @@ fn frame_with_border_produces_decorations() {
 
 #[test]
 fn float_right_frame_positioned_at_right_edge() {
-    let mut ts = setup(); // 800x600
+    let mut ts = make_typesetter(); // 800x600
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1393,7 +1247,7 @@ fn float_right_frame_positioned_at_right_edge() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Right")],
+        blocks: vec![make_block(9000,"Right")],
         tables: vec![],
         frames: vec![],
     });
@@ -1415,7 +1269,7 @@ fn float_right_frame_positioned_at_right_edge() {
 
 #[test]
 fn absolute_frame_does_not_affect_content_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Normal block")]);
     let height_before = ts.content_height();
 
@@ -1431,7 +1285,7 @@ fn absolute_frame_does_not_affect_content_height() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Floating")],
+        blocks: vec![make_block(9000,"Floating")],
         tables: vec![],
         frames: vec![],
     });
@@ -1458,7 +1312,7 @@ fn absolute_frame_does_not_affect_content_height() {
 
 #[test]
 fn underline_inside_table_cell_produces_decoration() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     let cell = CellLayoutParams {
         row: 0,
@@ -1533,7 +1387,7 @@ fn underline_inside_table_cell_produces_decoration() {
 
 #[test]
 fn underline_inside_frame_produces_decoration() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1698,7 +1552,7 @@ fn switching_from_fixed_to_auto() {
 
 #[test]
 fn overline_produces_decoration_rect() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let block = BlockLayoutParams {
         block_id: 1,
         position: 0,
@@ -1760,7 +1614,7 @@ fn overline_produces_decoration_rect() {
 
 #[test]
 fn float_left_frame_renders() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1774,7 +1628,7 @@ fn float_left_frame_renders() {
         padding: 4.0,
         border_width: 0.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("FloatL")],
+        blocks: vec![make_block(9000,"FloatL")],
         tables: vec![],
         frames: vec![],
     });
@@ -1794,7 +1648,7 @@ fn float_left_frame_renders() {
 
 #[test]
 fn block_after_table_has_margin_applied() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_table(&TableLayoutParams {
         table_id: 1,
@@ -1825,7 +1679,7 @@ fn block_after_table_has_margin_applied() {
 
 #[test]
 fn relayout_block_shifts_table_below() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "Short.")]);
     ts.add_table(&TableLayoutParams {
         table_id: 2,
@@ -1899,7 +1753,7 @@ fn relayout_block_shifts_table_below() {
 
 #[test]
 fn frame_with_nested_table_renders() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -1913,7 +1767,7 @@ fn frame_with_nested_table_renders() {
         padding: 4.0,
         border_width: 1.0,
         border_style: FrameBorderStyle::Full,
-        blocks: vec![make_frame_block("Before table")],
+        blocks: vec![make_block(9000,"Before table")],
         tables: vec![(
             1,
             TableLayoutParams {
@@ -1939,7 +1793,7 @@ fn frame_with_nested_table_renders() {
 
 #[test]
 fn render_block_only_preserves_table_decorations() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     // Layout: block 1 + table + block 2
     ts.layout_blocks(vec![make_block(1, "First block")]);
     ts.add_table(&TableLayoutParams {
@@ -1967,8 +1821,8 @@ fn render_block_only_preserves_table_decorations() {
     let border_count = borders_full.len();
 
     // render_block_only should still include table decorations
-    let frame = ts.render_block_only(1);
-    let borders_after: Vec<_> = frame
+    let frame_after = ts.render_block_only(1);
+    let borders_after: Vec<_> = frame_after
         .decorations
         .iter()
         .filter(|d| d.kind == text_typeset::DecorationKind::TableBorder)
@@ -1982,7 +1836,7 @@ fn render_block_only_preserves_table_decorations() {
 
 #[test]
 fn render_block_only_preserves_frame_decorations() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "First block")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -2015,8 +1869,8 @@ fn render_block_only_preserves_frame_decorations() {
     let bg_count = bg_decos_full.len();
 
     // render_block_only should still include frame border decorations
-    let frame = ts.render_block_only(1);
-    let bg_decos_after: Vec<_> = frame
+    let frame_after = ts.render_block_only(1);
+    let bg_decos_after: Vec<_> = frame_after
         .decorations
         .iter()
         .filter(|d| d.kind == text_typeset::DecorationKind::Background)
@@ -2030,7 +1884,7 @@ fn render_block_only_preserves_frame_decorations() {
 
 #[test]
 fn render_block_only_preserves_frame_glyphs() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "First block")]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 20,
@@ -2058,19 +1912,19 @@ fn render_block_only_preserves_frame_glyphs() {
     );
 
     // render_block_only should preserve frame content glyphs
-    let frame = ts.render_block_only(1);
+    let frame_after = ts.render_block_only(1);
     assert_eq!(
-        frame.glyphs.len(),
+        frame_after.glyphs.len(),
         glyph_count_full,
         "render_block_only should preserve frame content glyphs, got {} vs full {}",
-        frame.glyphs.len(),
+        frame_after.glyphs.len(),
         glyph_count_full
     );
 }
 
 #[test]
 fn render_block_only_preserves_table_glyphs() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "First block")]);
     ts.add_table(&TableLayoutParams {
         table_id: 10,
@@ -2092,9 +1946,9 @@ fn render_block_only_preserves_table_glyphs() {
     let glyph_count_full = frame.glyphs.len();
     assert!(glyph_count_full > 0);
 
-    let frame = ts.render_block_only(1);
+    let frame_after = ts.render_block_only(1);
     assert_eq!(
-        frame.glyphs.len(),
+        frame_after.glyphs.len(),
         glyph_count_full,
         "render_block_only should preserve table cell glyphs"
     );
@@ -2102,7 +1956,7 @@ fn render_block_only_preserves_table_glyphs() {
 
 #[test]
 fn nested_frame_renders_inner_content() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -2162,7 +2016,7 @@ fn nested_frame_renders_inner_content() {
 
 #[test]
 fn nested_frame_contributes_to_content_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![]);
     ts.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -2202,7 +2056,7 @@ fn nested_frame_contributes_to_content_height() {
     let height_with_nested = ts.content_height();
 
     // Compare with a frame that has only the outer block (no nested frame)
-    let mut ts2 = setup();
+    let mut ts2 = make_typesetter();
     ts2.layout_blocks(vec![]);
     ts2.add_frame(&FrameLayoutParams {
         frame_id: 1,
@@ -2281,7 +2135,7 @@ fn make_image_block(id: usize, image_name: &str, width: f32, height: f32) -> Blo
 
 #[test]
 fn image_produces_image_quad() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_image_block(1, "test.png", 100.0, 50.0)]);
     let frame = ts.render();
 
@@ -2305,7 +2159,7 @@ fn image_produces_image_quad() {
 
 #[test]
 fn image_has_positive_content_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_image_block(1, "test.png", 100.0, 50.0)]);
 
     assert!(
@@ -2316,7 +2170,7 @@ fn image_has_positive_content_height() {
 
 #[test]
 fn tall_image_expands_line_height() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     // A text-only block for baseline line height
     ts.layout_blocks(vec![make_block(1, "Hello")]);
     let text_height = ts.content_height();
@@ -2335,7 +2189,7 @@ fn tall_image_expands_line_height() {
 
 #[test]
 fn mixed_text_and_image_both_render() {
-    let mut ts = setup();
+    let mut ts = make_typesetter();
     let text = "Hello\u{FFFC}";
     ts.layout_blocks(vec![BlockLayoutParams {
         block_id: 1,
