@@ -1255,3 +1255,159 @@ fn caret_rect_stays_in_frame_after_insert() {
         y_block_caret_before[1]
     );
 }
+
+/// Reproduce: repeated Enter + char at the end of a frame block eventually
+/// causes the cursor to escape the frame.
+///
+/// Steps:
+/// 1. Position cursor at end of the last block in a blockquote frame
+/// 2. Enter -> "a" -> Enter -> "b" -> Enter -> "c" -> Enter
+/// 3. BUG: after the 4th Enter, cursor jumps outside the frame to the
+///    start of the next top-level block.
+#[test]
+#[ignore = "text-document bug: insert_block at end of frame escapes to next top-level block"]
+fn repeated_enter_at_end_of_frame_stays_inside() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = make_typesetter();
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find the frame-internal block (blockquote "Hello")
+    let h = ts.content_height();
+    let mut bq_pos = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+        {
+            bq_pos = Some(hit.position);
+            break;
+        }
+    }
+    let bq_start = bq_pos.expect("should find position inside blockquote frame");
+
+    // Move cursor to end of "Hello"
+    let bq_snap = doc
+        .snapshot_block_at_position(bq_start)
+        .expect("should find blockquote block");
+    let bq_text_len = bq_snap.text.chars().count();
+    let end_pos = bq_snap.position + bq_text_len;
+
+    let cursor = doc.cursor();
+    cursor.set_position(end_pos, text_document::MoveMode::MoveAnchor);
+
+    /// Check that the cursor is inside the frame by doing a hit_test at the
+    /// caret position and verifying the hit block has no block_visual_info
+    /// (frame-internal blocks are not in the top-level flow).
+    fn assert_cursor_in_frame(
+        ts: &mut Typesetter,
+        cursor_pos: usize,
+        label: &str,
+    ) {
+        let rect = ts.caret_rect(cursor_pos);
+        assert_caret_is_real(rect, label);
+
+        // hit_test at the caret should return a frame-internal block
+        let hx = rect[0].max(1.0);
+        let hy = rect[1] + rect[3] * 0.5;
+        if let Some(hit) = ts.hit_test(hx, hy) {
+            assert!(
+                ts.block_visual_info(hit.block_id).is_none(),
+                "{}: cursor at pos {} landed on top-level block {} instead of frame block. \
+                 caret_rect={:?}",
+                label,
+                cursor_pos,
+                hit.block_id,
+                rect
+            );
+        }
+    }
+
+    // Verify we start inside the frame
+    assert_cursor_in_frame(&mut ts, end_pos, "initial: end of Hello");
+
+    // Repeatedly: Enter + char, checking caret stays inside the frame each time
+    let chars = ['a', 'b', 'c'];
+    for (i, ch) in chars.iter().enumerate() {
+        // Enter
+        cursor.insert_block().unwrap();
+        let flow = doc.snapshot_flow();
+        ts.layout_full(&flow);
+        ts.render();
+
+        let pos_after_enter = cursor.position();
+        assert_cursor_in_frame(
+            &mut ts,
+            pos_after_enter,
+            &format!("after Enter #{} (before '{}')", i + 1, ch),
+        );
+
+        // Insert char
+        cursor.insert_text(&ch.to_string()).unwrap();
+        let flow = doc.snapshot_flow();
+        ts.layout_full(&flow);
+        ts.render();
+
+        let pos_after_char = cursor.position();
+        assert_cursor_in_frame(
+            &mut ts,
+            pos_after_char,
+            &format!("after inserting '{}'", ch),
+        );
+    }
+
+    // The 4th Enter (the one that triggers the bug)
+    cursor.insert_block().unwrap();
+    let flow = doc.snapshot_flow();
+
+    ts.layout_full(&flow);
+    ts.render();
+
+    let pos_final = cursor.position();
+
+    // Verify the new block was created inside the frame, not as a top-level block.
+    // The flow snapshot should have the new empty block inside the frame.
+    // Verify the cursor block is inside the blockquote frame, not a top-level block.
+    //
+    // The flow snapshot after 4th Enter shows:
+    //   [0] Block "Before"
+    //   [1] Frame (blockquote)
+    //     [0] Block "Hello"
+    //     [1] Block "a"
+    //     [2] Block "b"
+    //     [3] Block "c"
+    //   [2] Block "Af"    <-- cursor lands here (BUG: should be inside frame)
+    //   [3] Block "ter"
+    //
+    // text-document's insert_block() at the end of "c" splits the "After"
+    // block instead of creating a new empty block inside the frame.
+
+    // Check the flow snapshot: the cursor's block should be inside the frame
+    let flow_final = doc.snapshot_flow();
+    let cursor_block_in_frame = flow_final.elements.iter().any(|elem| {
+        if let text_document::FlowElementSnapshot::Frame(f) = elem {
+            f.elements.iter().any(|inner| {
+                if let text_document::FlowElementSnapshot::Block(b) = inner {
+                    b.position <= pos_final
+                        && pos_final <= b.position + b.text.chars().count()
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        cursor_block_in_frame,
+        "BUG (text-document): after 4th Enter at end of blockquote frame, \
+         cursor position {} is not inside the frame in the flow snapshot. \
+         insert_block() at the end of the last block in a frame should create \
+         a new block inside the frame, not split the next top-level block.",
+        pos_final
+    );
+}
