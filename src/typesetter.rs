@@ -345,6 +345,21 @@ impl Typesetter {
     /// this falls back to a full `render()` since cached glyph positions
     /// for other blocks would be stale.
     pub fn render_block_only(&mut self, block_id: usize) -> &RenderFrame {
+        // Frame blocks are cached per-frame (keyed by frame_id) and their
+        // internal decorations aren't stored in block_decorations. Fall back
+        // to a full render which correctly handles frame content, height
+        // changes, and decoration regeneration.
+        if !self.flow_layout.blocks.contains_key(&block_id) {
+            let in_frame = self
+                .flow_layout
+                .frames
+                .values()
+                .any(|frame| crate::layout::flow::frame_contains_block(frame, block_id));
+            if in_frame {
+                return self.render();
+            }
+        }
+
         // If the block's height changed, cached glyph positions for subsequent
         // blocks are stale. Fall back to a full re-render.
         if let Some(block) = self.flow_layout.blocks.get(&block_id) {

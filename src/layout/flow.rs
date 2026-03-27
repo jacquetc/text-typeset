@@ -341,7 +341,11 @@ impl FlowLayout {
         };
 
         let new_block = layout_block(registry, params, cell_width);
-        if let Some(old) = cell.blocks.iter_mut().find(|b| b.block_id == params.block_id) {
+        if let Some(old) = cell
+            .blocks
+            .iter_mut()
+            .find(|b| b.block_id == params.block_id)
+        {
             *old = new_block;
         }
 
@@ -622,7 +626,7 @@ impl FlowLayout {
 }
 
 /// Check whether a frame (or any of its nested frames) contains a block with the given id.
-fn frame_contains_block(frame: &FrameLayout, block_id: usize) -> bool {
+pub(crate) fn frame_contains_block(frame: &FrameLayout, block_id: usize) -> bool {
     if frame.blocks.iter().any(|b| b.block_id == block_id) {
         return true;
     }

@@ -419,7 +419,10 @@ pub fn convert_frame(frame: &FrameSnapshot) -> FrameLayoutParams {
         position,
         width: frame.format.width.map(|w| w as f32),
         height: frame.format.height.map(|h| h as f32),
-        margin_top: frame.format.top_margin.unwrap_or(if is_blockquote { 4 } else { 0 }) as f32,
+        margin_top: frame
+            .format
+            .top_margin
+            .unwrap_or(if is_blockquote { 4 } else { 0 }) as f32,
         margin_bottom: frame
             .format
             .bottom_margin

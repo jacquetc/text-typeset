@@ -56,6 +56,28 @@ fn compute_selection_rects(
     let view_top = scroll_offset;
     let view_bottom = scroll_offset + flow.viewport_height;
 
+    // Process frames first (matching hit_test / caret_rect priority so that
+    // after incremental relayout of a frame block, overlapping stale positions
+    // in subsequent top-level blocks don't produce ghost selection highlights).
+    for frame in flow.frames.values() {
+        let fy = frame.y;
+        let fh = frame.y + frame.content_y + frame.content_height;
+        if fh < view_top || fy > view_bottom {
+            continue;
+        }
+        selection_rects_for_frame(
+            frame,
+            0.0,
+            0.0,
+            start,
+            end,
+            scroll_offset,
+            viewport_width,
+            color,
+            &mut rects,
+        );
+    }
+
     for item in &flow.flow_order {
         match item {
             FlowItem::Block {
@@ -96,9 +118,7 @@ fn compute_selection_rects(
                 }
                 if let Some(table) = flow.tables.get(table_id) {
                     for cell in &table.cell_layouts {
-                        if cell.row >= table.row_ys.len()
-                            || cell.column >= table.column_xs.len()
-                        {
+                        if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
                             continue;
                         }
                         let cell_x = table.column_xs[cell.column];
@@ -119,31 +139,8 @@ fn compute_selection_rects(
                     }
                 }
             }
-            FlowItem::Frame {
-                frame_id,
-                y,
-                height,
-            } => {
-                if *y + *height < view_top {
-                    continue;
-                }
-                if *y > view_bottom {
-                    break;
-                }
-                if let Some(frame) = flow.frames.get(frame_id) {
-                    selection_rects_for_frame(
-                        frame,
-                        0.0,
-                        0.0,
-                        start,
-                        end,
-                        scroll_offset,
-                        viewport_width,
-                        color,
-                        &mut rects,
-                    );
-                }
-            }
+            // Frames already processed above
+            FlowItem::Frame { .. } => {}
         }
     }
 
@@ -167,7 +164,15 @@ fn selection_rects_for_frame(
     let fy = base_y + frame.y + frame.content_y;
     for block in &frame.blocks {
         selection_rects_for_block(
-            block, fx, fy, start, end, scroll_offset, viewport_width, color, rects,
+            block,
+            fx,
+            fy,
+            start,
+            end,
+            scroll_offset,
+            viewport_width,
+            color,
+            rects,
         );
     }
     for table in &frame.tables {
@@ -179,14 +184,30 @@ fn selection_rects_for_frame(
             let cell_y = fy + table.y + table.row_ys[cell.row];
             for block in &cell.blocks {
                 selection_rects_for_block(
-                    block, cell_x, cell_y, start, end, scroll_offset, viewport_width, color, rects,
+                    block,
+                    cell_x,
+                    cell_y,
+                    start,
+                    end,
+                    scroll_offset,
+                    viewport_width,
+                    color,
+                    rects,
                 );
             }
         }
     }
     for nested in &frame.frames {
         selection_rects_for_frame(
-            nested, fx, fy, start, end, scroll_offset, viewport_width, color, rects,
+            nested,
+            fx,
+            fy,
+            start,
+            end,
+            scroll_offset,
+            viewport_width,
+            color,
+            rects,
         );
     }
 }
@@ -242,4 +263,3 @@ fn selection_rects_for_block(
         }
     }
 }
-

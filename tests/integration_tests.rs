@@ -369,7 +369,10 @@ fn hit_test_below_blockquote_lands_on_block_after() {
     // Hit test near the bottom of the viewport - "After" should be there
     let content_h = ts.content_height();
     let result = ts.hit_test(10.0, content_h - 5.0);
-    assert!(result.is_some(), "hit test near bottom should return a result");
+    assert!(
+        result.is_some(),
+        "hit test near bottom should return a result"
+    );
     let hit = result.unwrap();
     // The last block "After" should be hit, not the blockquote's block
     assert!(
@@ -382,9 +385,7 @@ fn hit_test_below_blockquote_lands_on_block_after() {
 #[test]
 fn caret_rect_moves_through_blockquote() {
     let doc = TextDocument::new();
-    let op = doc
-        .set_markdown("AB\n\n> CD\n\nEF")
-        .unwrap();
+    let op = doc.set_markdown("AB\n\n> CD\n\nEF").unwrap();
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
@@ -422,9 +423,7 @@ fn caret_rect_moves_through_blockquote() {
 #[test]
 fn selection_spanning_blockquote_boundary() {
     let doc = TextDocument::new();
-    let op = doc
-        .set_markdown("AB\n\n> CD\n\nEF")
-        .unwrap();
+    let op = doc.set_markdown("AB\n\n> CD\n\nEF").unwrap();
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
@@ -496,9 +495,7 @@ fn ensure_caret_visible_inside_blockquote() {
 #[test]
 fn caret_rect_after_edit_inside_blockquote() {
     let doc = TextDocument::new();
-    let op = doc
-        .set_markdown("Before\n\n> Short\n\nAfter")
-        .unwrap();
+    let op = doc.set_markdown("Before\n\n> Short\n\nAfter").unwrap();
     op.wait().unwrap();
     let flow = doc.snapshot_flow();
 
@@ -534,7 +531,10 @@ fn caret_rect_after_edit_inside_blockquote() {
     // Find the "After" position again in the new layout
     let h2 = ts.content_height();
     let after_hit2 = ts.hit_test(10.0, h2 - 5.0);
-    assert!(after_hit2.is_some(), "should find After block in new layout");
+    assert!(
+        after_hit2.is_some(),
+        "should find After block in new layout"
+    );
     let after_pos2 = after_hit2.unwrap().position;
     let rect_after_edit = ts.caret_rect(after_pos2);
 
@@ -668,10 +668,12 @@ fn selection_spanning_nested_blockquote() {
     let h = ts.content_height();
     let mut positions = Vec::new();
     for y_probe in (0..(h as i32)).step_by(3) {
-        if let Some(hit) = ts.hit_test(80.0, y_probe as f32) {
-            if positions.last().map_or(true, |&(_, last_bid)| last_bid != hit.block_id) {
-                positions.push((hit.position, hit.block_id));
-            }
+        if let Some(hit) = ts.hit_test(80.0, y_probe as f32)
+            && positions
+                .last()
+                .is_none_or(|&(_, last_bid)| last_bid != hit.block_id)
+        {
+            positions.push((hit.position, hit.block_id));
         }
     }
     assert!(
@@ -718,9 +720,7 @@ fn caret_rect_after_edit_inside_nested_blockquote() {
 
     // Find "After" position
     let h = ts.content_height();
-    let after_hit = ts
-        .hit_test(10.0, h - 5.0)
-        .expect("should find After block");
+    let after_hit = ts.hit_test(10.0, h - 5.0).expect("should find After block");
     let rect_before = ts.caret_rect(after_hit.position);
 
     // Edit the nested blockquote to have longer text
@@ -742,5 +742,518 @@ fn caret_rect_after_edit_inside_nested_blockquote() {
         "caret for After should move down after nested blockquote grows: {} -> {}",
         rect_before[1],
         rect_after[1]
+    );
+}
+
+// ── Incremental relayout inside frame (typing simulation) ──────
+
+#[test]
+fn incremental_relayout_blockquote_shows_new_glyph() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    let frame1 = ts.render();
+    let glyph_count_before = frame1.glyphs.len();
+
+    // Find position inside the blockquote text "Hello"
+    let h = ts.content_height();
+    let mut bq_pos = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32) {
+            let rect = ts.caret_rect(hit.position);
+            // Look for indented content (blockquote)
+            if rect[0] > 20.0 {
+                bq_pos = Some(hit.position);
+                break;
+            }
+        }
+    }
+    let pos = bq_pos.expect("should find a position inside the blockquote");
+
+    // Insert a character at that position using TextCursor
+    let cursor = doc.cursor();
+    cursor.set_position(pos, text_document::MoveMode::MoveAnchor);
+    cursor.insert_text("X").unwrap();
+
+    // Get the modified block snapshot and convert
+    let block_snapshot = doc
+        .snapshot_block_at_position(pos)
+        .expect("should find block at cursor position");
+    let block_params = text_typeset::bridge::convert_block(&block_snapshot);
+
+    // Incremental relayout (NOT layout_full)
+    ts.relayout_block(&block_params);
+    let frame2 = ts.render();
+    let glyph_count_after = frame2.glyphs.len();
+
+    assert!(
+        glyph_count_after > glyph_count_before,
+        "after inserting a character in blockquote via relayout_block, \
+         glyph count should increase: {} -> {}",
+        glyph_count_before,
+        glyph_count_after
+    );
+}
+
+#[test]
+fn render_block_only_for_frame_block_shows_new_glyph() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    let frame1 = ts.render();
+    let glyph_count_before = frame1.glyphs.len();
+
+    // Find a position inside the blockquote by scanning y and filtering
+    // for blocks NOT in flow.blocks (i.e. frame-internal blocks)
+    let h = ts.content_height();
+    let mut bq_pos = None;
+    let mut bq_block_id = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32) {
+            // block_visual_info returns None for frame-internal blocks
+            if ts.block_visual_info(hit.block_id).is_none() {
+                bq_pos = Some(hit.position);
+                bq_block_id = Some(hit.block_id);
+                break;
+            }
+        }
+    }
+    let pos = bq_pos.expect("should find a position inside the blockquote frame");
+    let found_block_id = bq_block_id.unwrap();
+
+    // Insert a character at that position using TextCursor
+    let cursor = doc.cursor();
+    cursor.set_position(pos, text_document::MoveMode::MoveAnchor);
+    cursor.insert_text("X").unwrap();
+
+    // Get the modified block snapshot and convert
+    let block_snapshot = doc
+        .snapshot_block_at_position(pos)
+        .expect("should find block at cursor position");
+    let block_params = text_typeset::bridge::convert_block(&block_snapshot);
+    let block_id = block_params.block_id;
+    assert_eq!(
+        block_id, found_block_id,
+        "block_id from snapshot should match the one found by hit_test"
+    );
+
+    ts.relayout_block(&block_params);
+
+    // Use render_block_only (the app's fast path for typing)
+    let frame2 = ts.render_block_only(block_id);
+    let glyph_count_after = frame2.glyphs.len();
+
+    assert!(
+        glyph_count_after > glyph_count_before,
+        "render_block_only for a frame block should show the new character: {} -> {}",
+        glyph_count_before,
+        glyph_count_after
+    );
+}
+
+#[test]
+fn cursor_reaches_all_positions_in_frame_block_after_insert() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find a frame-internal block
+    let h = ts.content_height();
+    let mut bq_pos = None;
+    let mut bq_block_id = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+        {
+            bq_pos = Some(hit.position);
+            bq_block_id = Some(hit.block_id);
+            break;
+        }
+    }
+    let pos = bq_pos.expect("should find a position inside the blockquote frame");
+    let block_id = bq_block_id.unwrap();
+
+    // Record the block position range before insert
+    // "Hello" = 5 chars, so block should have positions block_pos..block_pos+5
+    let rect_before_end = ts.caret_rect(pos + 5);
+    assert!(
+        rect_before_end[2] > 0.0,
+        "caret should be visible at end of 'Hello'"
+    );
+
+    // Insert "X" at position `pos` (start of block text) making "XHello"
+    let cursor = doc.cursor();
+    cursor.set_position(pos, text_document::MoveMode::MoveAnchor);
+    cursor.insert_text("X").unwrap();
+
+    let block_snapshot = doc
+        .snapshot_block_at_position(pos)
+        .expect("should find block");
+    let block_params = text_typeset::bridge::convert_block(&block_snapshot);
+    assert_eq!(block_params.block_id, block_id);
+
+    ts.relayout_block(&block_params);
+    ts.render();
+
+    // After insert, block text is "XHello" (6 chars)
+    // Every position from block_pos to block_pos+6 should have a valid caret
+    let block_position = block_params.position;
+    let text_len = block_params.text.chars().count();
+    for offset in 0..=text_len {
+        let abs_pos = block_position + offset;
+        let rect = ts.caret_rect(abs_pos);
+        assert!(
+            rect[2] > 0.0 && rect[3] > 0.0,
+            "caret_rect at offset {} (abs pos {}) should be valid, got {:?}",
+            offset,
+            abs_pos,
+            rect
+        );
+    }
+
+    // Also verify text-document's cursor can reach every position
+    // via set_position (simulating what the app does on arrow keys)
+    let cursor2 = doc.cursor();
+    for offset in 0..=text_len {
+        let abs_pos = block_position + offset;
+        cursor2.set_position(abs_pos, text_document::MoveMode::MoveAnchor);
+        let actual = cursor2.position();
+        assert_eq!(
+            actual, abs_pos,
+            "text-document cursor should reach position {} but got {}",
+            abs_pos, actual
+        );
+    }
+
+    // And verify MoveRight can step through all positions in the block
+    cursor2.set_position(block_position, text_document::MoveMode::MoveAnchor);
+    for offset in 1..=text_len {
+        cursor2.move_position(
+            text_document::MoveOperation::Right,
+            text_document::MoveMode::MoveAnchor,
+            1,
+        );
+        let expected = block_position + offset;
+        let actual = cursor2.position();
+        assert_eq!(
+            actual, expected,
+            "MoveRight step {} should reach position {} but cursor is at {}",
+            offset, expected, actual
+        );
+    }
+
+    // Verify that the document end is also reachable (position == doc length)
+    let doc_len = doc.character_count();
+    cursor2.set_position(doc_len, text_document::MoveMode::MoveAnchor);
+    assert_eq!(
+        cursor2.position(),
+        doc_len,
+        "cursor should reach document end after insert"
+    );
+    // And length - 1
+    cursor2.set_position(doc_len - 1, text_document::MoveMode::MoveAnchor);
+    assert_eq!(
+        cursor2.position(),
+        doc_len - 1,
+        "cursor should reach document length - 1 after insert"
+    );
+    // Caret should be valid at doc_len - 1
+    let rect = ts.caret_rect(doc_len - 1);
+    assert!(
+        rect[3] > 0.0,
+        "caret at doc_len-1 ({}) should be valid, got {:?}",
+        doc_len - 1,
+        rect
+    );
+}
+
+#[test]
+fn frame_block_wrapping_after_insert_grows_frame() {
+    // Use a narrow viewport to make wrapping happen quickly
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("Before\n\n> Hello\n\nAfter\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    ts.set_viewport(200.0, 600.0); // narrow: makes wrapping likely
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find the frame-internal block
+    let h = ts.content_height();
+    let mut bq_pos = None;
+    let mut bq_block_id = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+        {
+            bq_pos = Some(hit.position);
+            bq_block_id = Some(hit.block_id);
+            break;
+        }
+    }
+    let pos = bq_pos.expect("should find a position inside the blockquote frame");
+    let block_id = bq_block_id.unwrap();
+
+    let height_before = ts.content_height();
+
+    // Insert enough text to force wrapping (30 wide chars)
+    let cursor = doc.cursor();
+    cursor.set_position(pos, text_document::MoveMode::MoveAnchor);
+    cursor
+        .insert_text("ABCDEFGHIJKLMNOPQRSTUVWXYZ1234")
+        .unwrap();
+
+    let block_snapshot = doc
+        .snapshot_block_at_position(pos)
+        .expect("should find block");
+    let block_params = text_typeset::bridge::convert_block(&block_snapshot);
+    assert_eq!(block_params.block_id, block_id);
+
+    ts.relayout_block(&block_params);
+    ts.render();
+
+    let height_after = ts.content_height();
+
+    // The text should now wrap to multiple lines, making the frame taller
+    assert!(
+        height_after > height_before,
+        "content height should increase after inserting enough text to wrap: {} -> {}",
+        height_before,
+        height_after
+    );
+
+    // Every position in the block should have a valid caret
+    let text_len = block_params.text.chars().count();
+    let block_position = block_params.position;
+    for offset in 0..=text_len {
+        let abs_pos = block_position + offset;
+        let rect = ts.caret_rect(abs_pos);
+        assert!(
+            rect[3] > 0.0,
+            "caret at offset {} (abs pos {}) should be valid after wrapping, got {:?}",
+            offset,
+            abs_pos,
+            rect
+        );
+    }
+}
+
+/// Compare initial frame block layout with incremental relayout.
+/// Checks that the line breaking width (and hence line count) matches.
+#[test]
+fn frame_block_relayout_preserves_line_structure() {
+    let doc = TextDocument::new();
+    let long_text = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let md = format!("Before\n\n> {}\n\nAfter\n", long_text);
+    let op = doc.set_markdown(&md).unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    ts.set_viewport(200.0, 600.0);
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find the frame-internal block and its line count from initial layout
+    let h = ts.content_height();
+    let mut bq_block_id = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+        {
+            bq_block_id = Some(hit.block_id);
+            break;
+        }
+    }
+    let _block_id = bq_block_id.expect("should find blockquote block");
+
+    // Snapshot the block from text-document (without editing) and relayout
+    // This tests whether relayout with the SAME text produces the SAME layout
+    let block_snapshot = doc
+        .snapshot_block_at_position(7) // position 7 is inside the blockquote
+        .expect("should find block");
+    let block_params = text_typeset::bridge::convert_block(&block_snapshot);
+
+    // Get the caret positions at start and end BEFORE relayout
+    let text_len_chars = block_params.text.chars().count();
+    let caret_before_start = ts.caret_rect(block_params.position);
+    let caret_before_end = ts.caret_rect(block_params.position + text_len_chars);
+
+    // Now relayout with same text
+    ts.relayout_block(&block_params);
+    ts.render();
+
+    let caret_after_start = ts.caret_rect(block_params.position);
+    let caret_after_end = ts.caret_rect(block_params.position + text_len_chars);
+
+    // Start caret should be at the same position
+    assert!(
+        (caret_before_start[0] - caret_after_start[0]).abs() < 1.0
+            && (caret_before_start[1] - caret_after_start[1]).abs() < 1.0,
+        "start caret should not move: {:?} -> {:?}",
+        caret_before_start,
+        caret_after_start
+    );
+
+    // End caret should be at the same position (same line structure)
+    assert!(
+        (caret_before_end[0] - caret_after_end[0]).abs() < 1.0
+            && (caret_before_end[1] - caret_after_end[1]).abs() < 1.0,
+        "end caret should not move after relayout with same text: {:?} -> {:?}",
+        caret_before_end,
+        caret_after_end
+    );
+}
+
+/// Simulate the app's actual editing loop: char-by-char insert with
+/// render_block_only, verifying the frame grows and glyphs appear.
+#[test]
+fn render_block_only_frame_grows_on_wrap() {
+    let doc = TextDocument::new();
+    let op = doc.set_markdown("X\n\n> Hello\n\nY\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    ts.set_viewport(200.0, 600.0);
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find the frame-internal block
+    let h = ts.content_height();
+    let mut bq_pos = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+        {
+            bq_pos = Some(hit.position);
+            break;
+        }
+    }
+    let pos = bq_pos.expect("should find frame block");
+
+    let height_before = ts.content_height();
+    let glyphs_before = ts.render().glyphs.len();
+
+    // Insert 30 chars one at a time (like real typing), using render_block_only
+    let cursor = doc.cursor();
+    for i in 0..30 {
+        let insert_pos = pos + i;
+        cursor.set_position(insert_pos, text_document::MoveMode::MoveAnchor);
+        cursor.insert_text("W").unwrap();
+
+        let snap = doc
+            .snapshot_block_at_position(insert_pos)
+            .expect("block snap");
+        let params = text_typeset::bridge::convert_block(&snap);
+        ts.relayout_block(&params);
+        ts.render_block_only(params.block_id);
+    }
+
+    let height_after = ts.content_height();
+
+    // Full render to get clean glyph count
+    let glyphs_final = ts.render().glyphs.len();
+
+    assert!(
+        height_after > height_before,
+        "frame should have grown: {} -> {}",
+        height_before,
+        height_after
+    );
+    assert!(
+        glyphs_final > glyphs_before,
+        "should have more glyphs: {} -> {}",
+        glyphs_before,
+        glyphs_final
+    );
+}
+
+/// After inserting text in a frame block, caret_rect for positions inside the
+/// frame should point inside the frame - not jump to a subsequent top-level block.
+#[test]
+fn caret_rect_stays_in_frame_after_insert() {
+    let doc = TextDocument::new();
+    // "X" (block 0), frame with "Hello" (block inside frame), "Y" (block after frame)
+    let op = doc.set_markdown("X\n\n> Hello\n\nY\n").unwrap();
+    op.wait().unwrap();
+
+    let mut ts = setup_typesetter();
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find the frame-internal block
+    let h = ts.content_height();
+    let mut frame_block_pos = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32)
+            && ts.block_visual_info(hit.block_id).is_none()
+        {
+            frame_block_pos = Some((hit.position, hit.block_id));
+            break;
+        }
+    }
+    let (bq_pos, _) = frame_block_pos.expect("should find blockquote block");
+
+    // Get the "Y" block position by scanning below the frame
+    let mut y_block_pos = None;
+    for y in (0..(h as i32)).step_by(2) {
+        if let Some(hit) = ts.hit_test(60.0, y as f32) {
+            // Top-level block below the frame block
+            if hit.position > bq_pos && ts.block_visual_info(hit.block_id).is_some() {
+                y_block_pos = Some(hit.position);
+                break;
+            }
+        }
+    }
+    let y_pos = y_block_pos.expect("should find Y block");
+    let y_block_caret_before = ts.caret_rect(y_pos);
+
+    // Insert "Z" at the start of "Hello" (bq_pos, same as the passing tests)
+    let cursor = doc.cursor();
+    cursor.set_position(bq_pos, text_document::MoveMode::MoveAnchor);
+    cursor.insert_text("Z").unwrap();
+
+    let snap = doc
+        .snapshot_block_at_position(bq_pos)
+        .expect("should find frame block");
+    assert!(
+        snap.text.contains("Z"),
+        "frame block text should contain 'Z', got {:?}",
+        snap.text
+    );
+
+    let params = text_typeset::bridge::convert_block(&snap);
+    ts.relayout_block(&params);
+    ts.render();
+
+    // The caret at end of frame block should be above the "Y" block
+    let frame_text_len = params.text.chars().count();
+    let end_of_frame = params.position + frame_text_len;
+    let frame_end_caret = ts.caret_rect(end_of_frame);
+
+    assert!(
+        frame_end_caret[1] < y_block_caret_before[1],
+        "caret at end of frame block (pos {}) should be above 'Y' block: \
+         frame_caret_y={} should be < y_block_y={}",
+        end_of_frame,
+        frame_end_caret[1],
+        y_block_caret_before[1]
     );
 }

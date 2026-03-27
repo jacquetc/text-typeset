@@ -178,8 +178,7 @@ pub fn break_into_lines(
     for line in &mut lines {
         for run in &mut line.runs {
             for glyph in &mut run.shaped_run.glyphs {
-                glyph.cluster =
-                    byte_offset_to_char_offset(text, glyph.cluster as usize) as u32;
+                glyph.cluster = byte_offset_to_char_offset(text, glyph.cluster as usize) as u32;
             }
         }
     }

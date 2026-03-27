@@ -709,7 +709,13 @@ fn make_block_at(id: usize, position: usize, text: &str) -> BlockLayoutParams {
     }
 }
 
-fn make_cell_at(row: usize, col: usize, block_id: usize, position: usize, text: &str) -> CellLayoutParams {
+fn make_cell_at(
+    row: usize,
+    col: usize,
+    block_id: usize,
+    position: usize,
+    text: &str,
+) -> CellLayoutParams {
     CellLayoutParams {
         row,
         column: col,
@@ -839,7 +845,10 @@ fn hit_test_inside_table_cell_returns_correct_block() {
     let table_y = block1_info.y + block1_info.height;
     // Hit at screen coords: x in the middle of the cell, y inside the table
     let result = ts.hit_test(50.0, table_y + 10.0);
-    assert!(result.is_some(), "hit test inside table cell should return a result");
+    assert!(
+        result.is_some(),
+        "hit test inside table cell should return a result"
+    );
     let result = result.unwrap();
     assert_eq!(
         result.block_id, 100,
@@ -1005,7 +1014,10 @@ fn hit_test_inside_frame_returns_frame_block() {
     let frame_content_y = block1_info.y + block1_info.height + 4.0 + 3.0 + 8.0 + 5.0;
     // Hit inside the frame content
     let result = ts.hit_test(50.0, frame_content_y);
-    assert!(result.is_some(), "hit test inside frame should return a result");
+    assert!(
+        result.is_some(),
+        "hit test inside frame should return a result"
+    );
     let hit = result.unwrap();
     assert_eq!(
         hit.block_id, 100,
@@ -1120,6 +1132,106 @@ fn caret_rect_inside_frame_advances_with_position() {
     );
 }
 
+// ── Relayout frame block (simulating typing) ───────────────────
+
+#[test]
+fn relayout_frame_block_renders_new_glyphs() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Hi")],
+        tables: vec![],
+        frames: vec![],
+    });
+
+    let frame1 = ts.render();
+    let glyph_count_before = frame1.glyphs.len();
+    let caret_before = ts.caret_rect(4); // after 'H' in "Hi"
+
+    // Simulate typing: "Hi" -> "Hxi" (insert 'x' at position 4)
+    ts.relayout_block(&make_block_at(100, 3, "Hxi"));
+    let frame2 = ts.render();
+    let glyph_count_after = frame2.glyphs.len();
+
+    assert!(
+        glyph_count_after > glyph_count_before,
+        "after relayout with longer text, glyph count should increase: {} -> {}",
+        glyph_count_before,
+        glyph_count_after
+    );
+
+    // Caret at position 5 (after the inserted 'x') should be right of where 4 was
+    let caret_after = ts.caret_rect(5);
+    assert!(
+        caret_after[0] > caret_before[0],
+        "caret after typing should be right of previous caret: {} -> {}",
+        caret_before[0],
+        caret_after[0]
+    );
+}
+
+#[test]
+fn relayout_frame_block_caret_advances_correctly() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Hello")],
+        tables: vec![],
+        frames: vec![],
+    });
+    ts.render();
+
+    // Record caret positions before relayout
+    let caret_h = ts.caret_rect(3); // start of "Hello"
+    let caret_e = ts.caret_rect(4); // after 'H'
+
+    // Simulate typing 'X' at position 4: "Hello" -> "HXello"
+    ts.relayout_block(&make_block_at(100, 3, "HXello"));
+    ts.render();
+
+    // After relayout:
+    // pos 3 = start of "HXello" (same as before)
+    // pos 4 = after 'H' (should be same x as before since 'H' didn't change)
+    // pos 5 = after 'X' (the new char - cursor should be here)
+    let caret_h_after = ts.caret_rect(3);
+    let caret_x_after = ts.caret_rect(5); // after the inserted 'X'
+
+    assert!(
+        (caret_h_after[0] - caret_h[0]).abs() < 1.0,
+        "start of block caret should stay at same x: {} vs {}",
+        caret_h[0],
+        caret_h_after[0]
+    );
+    assert!(
+        caret_x_after[0] > caret_e[0],
+        "caret after inserted 'X' at pos 5 ({}) should be right of old pos 4 ({})",
+        caret_x_after[0],
+        caret_e[0]
+    );
+}
+
 // ── Nested frame (frame inside frame) tests ────────────────────
 
 #[test]
@@ -1224,7 +1336,10 @@ fn hit_test_inside_nested_frame_returns_inner_block() {
         caret[1]
     );
     let result = ts.hit_test(caret[0] + 10.0, caret[1] + caret[3] / 2.0);
-    assert!(result.is_some(), "hit test inside nested frame should return a result");
+    assert!(
+        result.is_some(),
+        "hit test inside nested frame should return a result"
+    );
     let hit = result.unwrap();
     assert_eq!(
         hit.block_id, 200,

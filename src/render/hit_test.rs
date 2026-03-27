@@ -26,6 +26,15 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
 
 /// Get the screen-space caret rectangle at a document position.
 pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f32; 4] {
+    // Search frames first (matching hit_test priority so that after incremental
+    // relayout of a frame block, overlapping stale positions in subsequent
+    // top-level blocks don't steal the caret).
+    for frame in flow.frames.values() {
+        if let Some(rect) = caret_rect_in_frame(frame, position, scroll_offset, 0.0, 0.0) {
+            return rect;
+        }
+    }
+
     // Search top-level blocks
     for item in &flow.flow_order {
         let bid = match item {
@@ -57,13 +66,6 @@ pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f3
                     return rect;
                 }
             }
-        }
-    }
-
-    // Search frame blocks and tables inside frames
-    for frame in flow.frames.values() {
-        if let Some(rect) = caret_rect_in_frame(frame, position, scroll_offset, 0.0, 0.0) {
-            return rect;
         }
     }
 
@@ -165,8 +167,7 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
         for table in &frame.tables {
             if local_y >= table.y
                 && local_y < table.y + table.total_height
-                && let Some(result) =
-                    hit_test_table_content(table, doc_y, x, offset_x, offset_y)
+                && let Some(result) = hit_test_table_content(table, doc_y, x, offset_x, offset_y)
             {
                 return Some(result);
             }
@@ -178,8 +179,7 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
             let nested_local_y = doc_y - nested_content_y;
             if nested_local_y >= 0.0
                 && nested_local_y < nested.content_height
-                && let Some(result) =
-                    hit_test_frame_content(nested, doc_y, x, offset_x, offset_y)
+                && let Some(result) = hit_test_frame_content(nested, doc_y, x, offset_x, offset_y)
             {
                 return Some(result);
             }
@@ -231,8 +231,7 @@ fn hit_test_frame_content(
         let nested_local_y = doc_y - nested_content_y;
         if nested_local_y >= 0.0
             && nested_local_y < nested.content_height
-            && let Some(result) =
-                hit_test_frame_content(nested, doc_y, x, offset_x, offset_y)
+            && let Some(result) = hit_test_frame_content(nested, doc_y, x, offset_x, offset_y)
         {
             return Some(result);
         }
@@ -318,7 +317,8 @@ fn hit_test_table_content(
 fn find_table_row(table: &crate::layout::table::TableLayout, local_y: f32) -> Option<usize> {
     for (r, &row_y) in table.row_ys.iter().enumerate() {
         let row_top = row_y - table.cell_padding;
-        let row_bottom = row_y + table.row_heights.get(r).copied().unwrap_or(0.0) + table.cell_padding;
+        let row_bottom =
+            row_y + table.row_heights.get(r).copied().unwrap_or(0.0) + table.cell_padding;
         if local_y >= row_top && local_y < row_bottom {
             return Some(r);
         }
@@ -330,9 +330,8 @@ fn find_table_row(table: &crate::layout::table::TableLayout, local_y: f32) -> Op
 fn find_table_column(table: &crate::layout::table::TableLayout, local_x: f32) -> Option<usize> {
     for (c, &col_x) in table.column_xs.iter().enumerate() {
         let col_left = col_x - table.cell_padding;
-        let col_right = col_x
-            + table.column_content_widths.get(c).copied().unwrap_or(0.0)
-            + table.cell_padding;
+        let col_right =
+            col_x + table.column_content_widths.get(c).copied().unwrap_or(0.0) + table.cell_padding;
         if local_x >= col_left && local_x < col_right {
             return Some(c);
         }
@@ -515,4 +514,3 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion, 
     // Past end of line
     (line.char_range.end, HitRegion::PastLineEnd, None)
 }
-
