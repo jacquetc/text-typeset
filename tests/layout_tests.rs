@@ -1034,3 +1034,58 @@ fn relayout_frame_block_updates_frame_height() {
         height_after
     );
 }
+
+#[test]
+fn relayout_block_inside_nested_frame_updates_heights() {
+    let mut ts = setup();
+    ts.set_viewport(200.0, 600.0);
+
+    ts.layout_blocks(vec![make_block_at(1, 0, "Before")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Outer")],
+        tables: vec![],
+        frames: vec![(
+            1,
+            FrameLayoutParams {
+                frame_id: 30,
+                position: FramePosition::Inline,
+                width: None,
+                height: None,
+                margin_top: 0.0,
+                margin_bottom: 0.0,
+                margin_left: 0.0,
+                margin_right: 0.0,
+                padding: 4.0,
+                border_width: 0.0,
+                border_style: FrameBorderStyle::None,
+                blocks: vec![make_block_at(200, 9, "Short")],
+                tables: vec![],
+                frames: vec![],
+            },
+        )],
+    });
+
+    let height_before = ts.content_height();
+
+    let long_text = "This is a much longer piece of text that should cause wrapping and increase the nested frame height.";
+    ts.relayout_block(&make_block_at(200, 9, long_text));
+
+    let height_after = ts.content_height();
+    assert!(
+        height_after > height_before,
+        "content height should grow after relayout of nested frame block: {} -> {}",
+        height_before,
+        height_after,
+    );
+}

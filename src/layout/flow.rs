@@ -236,9 +236,9 @@ impl FlowLayout {
             return;
         }
 
-        // Frame block: scan frames for the block_id
+        // Frame block: scan frames (including nested frames) for the block_id
         let frame_match = self.frames.iter().find_map(|(&fid, frame)| {
-            if frame.blocks.iter().any(|b| b.block_id == block_id) {
+            if frame_contains_block(frame, block_id) {
                 return Some(fid);
             }
             None
@@ -426,28 +426,9 @@ impl FlowLayout {
         };
 
         let old_total_height = frame.total_height;
-        let old_content_height = frame.content_height;
         let new_block = layout_block(registry, params, frame.content_width);
 
-        if let Some(old) = frame
-            .blocks
-            .iter_mut()
-            .find(|b| b.block_id == params.block_id)
-        {
-            *old = new_block;
-        }
-
-        // Reposition blocks within the frame
-        let mut content_y = 0.0f32;
-        for block in &mut frame.blocks {
-            block.y = content_y + block.top_margin;
-            let block_content = block.height - block.top_margin - block.bottom_margin;
-            content_y = block.y + block_content + block.bottom_margin;
-        }
-
-        frame.content_height = content_y;
-        // total_height changes by the same delta as content_height (chrome is fixed)
-        frame.total_height = old_total_height + (content_y - old_content_height);
+        relayout_block_in_frame(frame, params.block_id, new_block);
 
         let delta = frame.total_height - old_total_height;
 
@@ -638,4 +619,53 @@ impl FlowLayout {
         }
         None
     }
+}
+
+/// Check whether a frame (or any of its nested frames) contains a block with the given id.
+fn frame_contains_block(frame: &FrameLayout, block_id: usize) -> bool {
+    if frame.blocks.iter().any(|b| b.block_id == block_id) {
+        return true;
+    }
+    frame
+        .frames
+        .iter()
+        .any(|nested| frame_contains_block(nested, block_id))
+}
+
+/// Replace a block inside a frame (searching nested frames recursively)
+/// and recompute content/total heights up the tree.
+fn relayout_block_in_frame(frame: &mut FrameLayout, block_id: usize, new_block: BlockLayout) {
+    let old_content_height = frame.content_height;
+
+    // Try direct blocks first
+    if let Some(old) = frame.blocks.iter_mut().find(|b| b.block_id == block_id) {
+        *old = new_block;
+    } else {
+        // Recurse into nested frames
+        for nested in &mut frame.frames {
+            if frame_contains_block(nested, block_id) {
+                relayout_block_in_frame(nested, block_id, new_block);
+                break;
+            }
+        }
+    }
+
+    // Reposition all direct content (blocks, tables, nested frames) vertically
+    let mut content_y = 0.0f32;
+    for block in &mut frame.blocks {
+        block.y = content_y + block.top_margin;
+        let block_content = block.height - block.top_margin - block.bottom_margin;
+        content_y = block.y + block_content + block.bottom_margin;
+    }
+    for table in &mut frame.tables {
+        table.y = content_y;
+        content_y += table.total_height;
+    }
+    for nested in &mut frame.frames {
+        nested.y = content_y;
+        content_y += nested.total_height;
+    }
+
+    frame.content_height = content_y;
+    frame.total_height += content_y - old_content_height;
 }

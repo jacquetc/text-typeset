@@ -1218,10 +1218,11 @@ fn hit_test_inside_nested_frame_returns_inner_block() {
 
     // Use caret_rect to find where the nested frame content is
     let caret = ts.caret_rect(9);
-    // If caret_rect returned fallback, skip (the caret_rect test above will catch this)
-    if caret[1] <= 0.0 {
-        return;
-    }
+    assert!(
+        caret[1] > 0.0,
+        "caret_rect should return valid position for nested frame content (got y={})",
+        caret[1]
+    );
     let result = ts.hit_test(caret[0] + 10.0, caret[1] + caret[3] / 2.0);
     assert!(result.is_some(), "hit test inside nested frame should return a result");
     let hit = result.unwrap();
