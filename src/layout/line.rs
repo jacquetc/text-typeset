@@ -17,6 +17,38 @@ pub struct LayoutLine {
     pub char_range: Range<usize>,
 }
 
+impl LayoutLine {
+    /// Find the x coordinate for a char offset within this line.
+    ///
+    /// Walks runs and glyphs, returning the x position of the first glyph
+    /// whose cluster >= `offset`. Falls back to the end of the line.
+    pub fn x_for_offset(&self, offset: usize) -> f32 {
+        for (i, run) in self.runs.iter().enumerate() {
+            let mut glyph_x = run.x;
+            for glyph in &run.shaped_run.glyphs {
+                if glyph.cluster as usize >= offset {
+                    return glyph_x;
+                }
+                glyph_x += glyph.x_advance;
+            }
+            // Only return from this run if the offset doesn't belong to a later run
+            let next_run_start = self
+                .runs
+                .get(i + 1)
+                .and_then(|r| r.shaped_run.glyphs.first())
+                .map(|g| g.cluster as usize);
+            match next_run_start {
+                Some(next_start) if offset >= next_start => continue,
+                _ => return glyph_x,
+            }
+        }
+        self.runs
+            .last()
+            .map(|r| r.x + r.shaped_run.advance_width)
+            .unwrap_or(0.0)
+    }
+}
+
 pub struct PositionedRun {
     pub shaped_run: ShapedRun,
     /// X offset from the left edge of the content area.

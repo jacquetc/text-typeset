@@ -9,14 +9,68 @@ use crate::types::{HitRegion, HitTestResult};
 pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option<HitTestResult> {
     let doc_y = y + scroll_offset;
 
-    // Find which block contains this y position
-    let (block_id, block) = find_block_at_y(flow, doc_y)?;
+    // Try frames first (clicks inside frame content areas take priority)
+    if let Some(result) = hit_test_in_frame(flow, doc_y, x) {
+        return Some(result);
+    }
 
-    let content_top = block.y;
+    // Fall back to top-level blocks
+    let (block_id, block) = find_block_at_y(flow, doc_y)?;
+    hit_test_block(block_id, block, doc_y, x, 0.0, 0.0)
+}
+
+/// Get the screen-space caret rectangle at a document position.
+pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f32; 4] {
+    // Search top-level blocks
+    for item in &flow.flow_order {
+        let bid = match item {
+            FlowItem::Block { block_id, .. } => *block_id,
+            _ => continue,
+        };
+        let block = match flow.blocks.get(&bid) {
+            Some(b) => b,
+            None => continue,
+        };
+
+        if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, 0.0, 0.0) {
+            return rect;
+        }
+    }
+
+    // Search frame blocks
+    for frame in flow.frames.values() {
+        let offset_x = frame.x + frame.content_x;
+        let offset_y = frame.y + frame.content_y;
+        for block in &frame.blocks {
+            if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, offset_x, offset_y) {
+                return rect;
+            }
+        }
+    }
+
+    // Fallback: top-left
+    [0.0, -scroll_offset, 2.0, 16.0]
+}
+
+// ── Internal helpers ────────────────────────────────────────────
+
+use crate::layout::block::BlockLayout;
+use crate::layout::line::LayoutLine;
+
+/// Hit-test a single block, with optional coordinate offsets for frame-nested blocks.
+fn hit_test_block(
+    block_id: usize,
+    block: &BlockLayout,
+    doc_y: f32,
+    x: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<HitTestResult> {
+    let content_top = offset_y + block.y;
+    let local_x = x - offset_x;
 
     // Check if x is in the left margin
-    if x < block.left_margin {
-        // Return start of block
+    if local_x < block.left_margin {
         return Some(HitTestResult {
             position: block.position,
             block_id,
@@ -52,8 +106,8 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
     };
 
     // Find which glyph within the line
-    let local_x = x - block.left_margin;
-    let (offset_in_block, region, tooltip) = find_position_in_line(line, local_x);
+    let glyph_x = local_x - block.left_margin;
+    let (offset_in_block, region, tooltip) = find_position_in_line(line, glyph_x);
 
     Some(HitTestResult {
         position: block.position + offset_in_block,
@@ -64,53 +118,72 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
     })
 }
 
-/// Get the screen-space caret rectangle at a document position.
-pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f32; 4] {
-    // Find which block contains this position
+/// Try to hit-test within frame blocks.
+fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestResult> {
     for item in &flow.flow_order {
-        let bid = match item {
-            FlowItem::Block { block_id, .. } => *block_id,
+        let frame_id = match item {
+            FlowItem::Frame {
+                frame_id,
+                y,
+                height,
+            } if doc_y >= *y && doc_y < *y + *height => *frame_id,
             _ => continue,
         };
-        let block = match flow.blocks.get(&bid) {
-            Some(b) => b,
-            None => continue,
-        };
+        let frame = flow.frames.get(&frame_id)?;
+        let offset_x = frame.x + frame.content_x;
+        let offset_y = frame.y + frame.content_y;
+        let local_y = doc_y - offset_y;
 
-        let block_end = block.position + block.lines.last().map(|l| l.char_range.end).unwrap_or(0);
+        // Find block at local_y within frame
+        for block in &frame.blocks {
+            let block_bottom = block.y + block.height;
+            if local_y >= block.y && local_y < block_bottom {
+                return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
+            }
+        }
 
-        if position < block.position || position > block_end {
+        // Fallback: last block in frame
+        if let Some(block) = frame.blocks.last() {
+            return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
+        }
+    }
+    None
+}
+
+/// Compute the caret rect for a position within a single block.
+/// Returns None if the position is not within this block.
+fn caret_rect_in_block(
+    block: &BlockLayout,
+    position: usize,
+    scroll_offset: f32,
+    offset_x: f32,
+    offset_y: f32,
+) -> Option<[f32; 4]> {
+    let block_end = block.position + block.lines.last().map(|l| l.char_range.end).unwrap_or(0);
+
+    if position < block.position || position > block_end {
+        return None;
+    }
+
+    let offset_in_block = position - block.position;
+
+    for line in &block.lines {
+        if offset_in_block < line.char_range.start {
+            continue;
+        }
+        if offset_in_block > line.char_range.end {
             continue;
         }
 
-        let offset_in_block = position - block.position;
+        let caret_x = line.x_for_offset(offset_in_block) + block.left_margin + offset_x;
+        let caret_y = offset_y + block.y + line.y - line.ascent - scroll_offset;
+        let caret_height = line.line_height;
 
-        // Find the line containing this offset
-        for line in &block.lines {
-            if offset_in_block < line.char_range.start {
-                continue;
-            }
-            if offset_in_block > line.char_range.end {
-                continue;
-            }
-
-            // Find x position within the line
-            let caret_x = find_x_for_offset(line, offset_in_block) + block.left_margin;
-            let caret_y = block.y + line.y - line.ascent - scroll_offset;
-            let caret_height = line.line_height;
-
-            return [caret_x, caret_y, 2.0, caret_height];
-        }
+        return Some([caret_x, caret_y, 2.0, caret_height]);
     }
 
-    // Fallback: top-left
-    [0.0, -scroll_offset, 2.0, 16.0]
+    None
 }
-
-// ── Internal helpers ────────────────────────────────────────────
-
-use crate::layout::block::BlockLayout;
-use crate::layout::line::LayoutLine;
 
 fn find_block_at_y(flow: &FlowLayout, doc_y: f32) -> Option<(usize, &BlockLayout)> {
     if flow.flow_order.is_empty() {
@@ -195,29 +268,3 @@ fn find_position_in_line(line: &LayoutLine, local_x: f32) -> (usize, HitRegion, 
     (line.char_range.end, HitRegion::PastLineEnd, None)
 }
 
-fn find_x_for_offset(line: &LayoutLine, offset: usize) -> f32 {
-    let runs = &line.runs;
-    for (i, run) in runs.iter().enumerate() {
-        let mut glyph_x = run.x;
-        for glyph in &run.shaped_run.glyphs {
-            if glyph.cluster as usize >= offset {
-                return glyph_x;
-            }
-            glyph_x += glyph.x_advance;
-        }
-        // Only return from this run if the offset doesn't belong to a later run
-        let next_run_start = runs
-            .get(i + 1)
-            .and_then(|r| r.shaped_run.glyphs.first())
-            .map(|g| g.cluster as usize);
-        match next_run_start {
-            Some(next_start) if offset >= next_start => continue,
-            _ => return glyph_x,
-        }
-    }
-    // Fallback: end of line
-    line.runs
-        .last()
-        .map(|r| r.x + r.shaped_run.advance_width)
-        .unwrap_or(0.0)
-}
