@@ -62,30 +62,8 @@ pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f3
 
     // Search frame blocks and tables inside frames
     for frame in flow.frames.values() {
-        let fx = frame.x + frame.content_x;
-        let fy = frame.y + frame.content_y;
-        for block in &frame.blocks {
-            if let Some(rect) =
-                caret_rect_in_block(block, position, scroll_offset, fx, fy)
-            {
-                return rect;
-            }
-        }
-        for table in &frame.tables {
-            for cell in &table.cell_layouts {
-                if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
-                    continue;
-                }
-                let offset_x = fx + table.column_xs[cell.column];
-                let offset_y = fy + table.y + table.row_ys[cell.row];
-                for block in &cell.blocks {
-                    if let Some(rect) =
-                        caret_rect_in_block(block, position, scroll_offset, offset_x, offset_y)
-                    {
-                        return rect;
-                    }
-                }
-            }
+        if let Some(rect) = caret_rect_in_frame(frame, position, scroll_offset, 0.0, 0.0) {
+            return rect;
         }
     }
 
@@ -194,6 +172,19 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
             }
         }
 
+        // Try nested frames
+        for nested in &frame.frames {
+            let nested_content_y = offset_y + nested.y + nested.content_y;
+            let nested_local_y = doc_y - nested_content_y;
+            if nested_local_y >= 0.0
+                && nested_local_y < nested.content_height
+                && let Some(result) =
+                    hit_test_frame_content(nested, doc_y, x, offset_x, offset_y)
+            {
+                return Some(result);
+            }
+        }
+
         // Find block at local_y within frame
         for block in &frame.blocks {
             let block_bottom = block.y + block.height;
@@ -208,6 +199,58 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
             return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
         }
     }
+    None
+}
+
+/// Hit-test within a single frame's content (blocks, tables, nested frames).
+/// `base_x`/`base_y` are the parent coordinate offsets (before this frame's own offsets).
+fn hit_test_frame_content(
+    frame: &crate::layout::frame::FrameLayout,
+    doc_y: f32,
+    x: f32,
+    base_x: f32,
+    base_y: f32,
+) -> Option<HitTestResult> {
+    let offset_x = base_x + frame.x + frame.content_x;
+    let offset_y = base_y + frame.y + frame.content_y;
+    let local_y = doc_y - offset_y;
+
+    // Try tables
+    for table in &frame.tables {
+        if local_y >= table.y
+            && local_y < table.y + table.total_height
+            && let Some(result) = hit_test_table_content(table, doc_y, x, offset_x, offset_y)
+        {
+            return Some(result);
+        }
+    }
+
+    // Try nested frames (recursive)
+    for nested in &frame.frames {
+        let nested_content_y = offset_y + nested.y + nested.content_y;
+        let nested_local_y = doc_y - nested_content_y;
+        if nested_local_y >= 0.0
+            && nested_local_y < nested.content_height
+            && let Some(result) =
+                hit_test_frame_content(nested, doc_y, x, offset_x, offset_y)
+        {
+            return Some(result);
+        }
+    }
+
+    // Try blocks
+    for block in &frame.blocks {
+        let block_bottom = block.y + block.height;
+        if local_y >= block.y && local_y < block_bottom {
+            return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
+        }
+    }
+
+    // Fallback: last block
+    if let Some(block) = frame.blocks.last() {
+        return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
+    }
+
     None
 }
 
@@ -292,6 +335,45 @@ fn find_table_column(table: &crate::layout::table::TableLayout, local_x: f32) ->
             + table.cell_padding;
         if local_x >= col_left && local_x < col_right {
             return Some(c);
+        }
+    }
+    None
+}
+
+/// Search a frame (and its nested frames, recursively) for a caret position.
+fn caret_rect_in_frame(
+    frame: &crate::layout::frame::FrameLayout,
+    position: usize,
+    scroll_offset: f32,
+    base_x: f32,
+    base_y: f32,
+) -> Option<[f32; 4]> {
+    let fx = base_x + frame.x + frame.content_x;
+    let fy = base_y + frame.y + frame.content_y;
+    for block in &frame.blocks {
+        if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, fx, fy) {
+            return Some(rect);
+        }
+    }
+    for table in &frame.tables {
+        for cell in &table.cell_layouts {
+            if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
+                continue;
+            }
+            let offset_x = fx + table.column_xs[cell.column];
+            let offset_y = fy + table.y + table.row_ys[cell.row];
+            for block in &cell.blocks {
+                if let Some(rect) =
+                    caret_rect_in_block(block, position, scroll_offset, offset_x, offset_y)
+                {
+                    return Some(rect);
+                }
+            }
+        }
+    }
+    for nested in &frame.frames {
+        if let Some(rect) = caret_rect_in_frame(nested, position, scroll_offset, fx, fy) {
+            return Some(rect);
         }
     }
     None

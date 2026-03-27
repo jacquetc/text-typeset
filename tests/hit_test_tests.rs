@@ -1119,3 +1119,171 @@ fn caret_rect_inside_frame_advances_with_position() {
         rect_start[0]
     );
 }
+
+// ── Nested frame (frame inside frame) tests ────────────────────
+
+#[test]
+fn caret_rect_inside_nested_frame() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Outer")],
+        tables: vec![],
+        frames: vec![(
+            1,
+            FrameLayoutParams {
+                frame_id: 30,
+                position: FramePosition::Inline,
+                width: None,
+                height: None,
+                margin_top: 0.0,
+                margin_bottom: 0.0,
+                margin_left: 0.0,
+                margin_right: 0.0,
+                padding: 4.0,
+                border_width: 0.0,
+                border_style: FrameBorderStyle::None,
+                blocks: vec![make_block_at(200, 9, "Inner")],
+                tables: vec![],
+                frames: vec![],
+            },
+        )],
+    });
+    ts.render();
+
+    // Caret at position 9 (start of "Inner" in nested frame)
+    let rect = ts.caret_rect(9);
+    assert!(
+        rect[3] > 0.0,
+        "caret inside nested frame should have valid height (not fallback)"
+    );
+    // Should NOT be the fallback [0, -scroll, 2, 16]
+    assert!(
+        rect[1] > 0.0,
+        "caret y inside nested frame ({}) should be positive (below top-level content)",
+        rect[1]
+    );
+}
+
+#[test]
+fn hit_test_inside_nested_frame_returns_inner_block() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Outer")],
+        tables: vec![],
+        frames: vec![(
+            1,
+            FrameLayoutParams {
+                frame_id: 30,
+                position: FramePosition::Inline,
+                width: None,
+                height: None,
+                margin_top: 0.0,
+                margin_bottom: 0.0,
+                margin_left: 0.0,
+                margin_right: 0.0,
+                padding: 4.0,
+                border_width: 0.0,
+                border_style: FrameBorderStyle::None,
+                blocks: vec![make_block_at(200, 9, "Inner")],
+                tables: vec![],
+                frames: vec![],
+            },
+        )],
+    });
+    ts.render();
+
+    // Use caret_rect to find where the nested frame content is
+    let caret = ts.caret_rect(9);
+    // If caret_rect returned fallback, skip (the caret_rect test above will catch this)
+    if caret[1] <= 0.0 {
+        return;
+    }
+    let result = ts.hit_test(caret[0] + 10.0, caret[1] + caret[3] / 2.0);
+    assert!(result.is_some(), "hit test inside nested frame should return a result");
+    let hit = result.unwrap();
+    assert_eq!(
+        hit.block_id, 200,
+        "hit test inside nested frame should return the inner block id"
+    );
+}
+
+#[test]
+fn selection_inside_nested_frame() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Outer")],
+        tables: vec![],
+        frames: vec![(
+            1,
+            FrameLayoutParams {
+                frame_id: 30,
+                position: FramePosition::Inline,
+                width: None,
+                height: None,
+                margin_top: 0.0,
+                margin_bottom: 0.0,
+                margin_left: 0.0,
+                margin_right: 0.0,
+                padding: 4.0,
+                border_width: 0.0,
+                border_style: FrameBorderStyle::None,
+                blocks: vec![make_block_at(200, 9, "Inner")],
+                tables: vec![],
+                frames: vec![],
+            },
+        )],
+    });
+    // Select "Inner" (positions 9..14)
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: 9,
+        anchor: 14,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let sel_rects: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Selection)
+        .collect();
+    assert!(
+        !sel_rects.is_empty(),
+        "selection inside nested frame should produce selection rects"
+    );
+}

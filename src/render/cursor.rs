@@ -131,52 +131,64 @@ fn compute_selection_rects(
                     break;
                 }
                 if let Some(frame) = flow.frames.get(frame_id) {
-                    let fx = frame.x + frame.content_x;
-                    let fy = frame.y + frame.content_y;
-                    for block in &frame.blocks {
-                        selection_rects_for_block(
-                            block,
-                            fx,
-                            fy,
-                            start,
-                            end,
-                            scroll_offset,
-                            viewport_width,
-                            color,
-                            &mut rects,
-                        );
-                    }
-                    // Tables nested inside frames
-                    for table in &frame.tables {
-                        for cell in &table.cell_layouts {
-                            if cell.row >= table.row_ys.len()
-                                || cell.column >= table.column_xs.len()
-                            {
-                                continue;
-                            }
-                            let cell_x = fx + table.column_xs[cell.column];
-                            let cell_y = fy + table.y + table.row_ys[cell.row];
-                            for block in &cell.blocks {
-                                selection_rects_for_block(
-                                    block,
-                                    cell_x,
-                                    cell_y,
-                                    start,
-                                    end,
-                                    scroll_offset,
-                                    viewport_width,
-                                    color,
-                                    &mut rects,
-                                );
-                            }
-                        }
-                    }
+                    selection_rects_for_frame(
+                        frame,
+                        0.0,
+                        0.0,
+                        start,
+                        end,
+                        scroll_offset,
+                        viewport_width,
+                        color,
+                        &mut rects,
+                    );
                 }
             }
         }
     }
 
     rects
+}
+
+/// Generate selection rects for a frame and its nested content (recursive).
+#[allow(clippy::too_many_arguments)]
+fn selection_rects_for_frame(
+    frame: &crate::layout::frame::FrameLayout,
+    base_x: f32,
+    base_y: f32,
+    start: usize,
+    end: usize,
+    scroll_offset: f32,
+    viewport_width: f32,
+    color: [f32; 4],
+    rects: &mut Vec<DecorationRect>,
+) {
+    let fx = base_x + frame.x + frame.content_x;
+    let fy = base_y + frame.y + frame.content_y;
+    for block in &frame.blocks {
+        selection_rects_for_block(
+            block, fx, fy, start, end, scroll_offset, viewport_width, color, rects,
+        );
+    }
+    for table in &frame.tables {
+        for cell in &table.cell_layouts {
+            if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
+                continue;
+            }
+            let cell_x = fx + table.column_xs[cell.column];
+            let cell_y = fy + table.y + table.row_ys[cell.row];
+            for block in &cell.blocks {
+                selection_rects_for_block(
+                    block, cell_x, cell_y, start, end, scroll_offset, viewport_width, color, rects,
+                );
+            }
+        }
+    }
+    for nested in &frame.frames {
+        selection_rects_for_frame(
+            nested, fx, fy, start, end, scroll_offset, viewport_width, color, rects,
+        );
+    }
 }
 
 /// Generate selection rects for a single block at the given offset.
