@@ -352,6 +352,18 @@ fn render_frame_layout(
     }
 
     // Frame border decorations
+    append_frame_border_decorations(frame, scroll_offset, &mut render_frame.decorations);
+}
+
+/// Append frame border decoration rects to the given vec.
+///
+/// Extracted so that `rebuild_flat_frame` can regenerate frame decorations
+/// without a full render pass.
+pub fn append_frame_border_decorations(
+    frame: &crate::layout::frame::FrameLayout,
+    scroll_offset: f32,
+    decorations: &mut Vec<crate::types::DecorationRect>,
+) {
     if frame.border_width > 0.0
         && frame.border_style != crate::layout::frame::FrameBorderStyle::None
     {
@@ -368,7 +380,7 @@ fn render_frame_layout(
         match frame.border_style {
             crate::layout::frame::FrameBorderStyle::LeftOnly => {
                 // Blockquote style: left border only
-                render_frame.decorations.push(crate::types::DecorationRect {
+                decorations.push(crate::types::DecorationRect {
                     rect: [fx, fy, bw, fh],
                     color,
                     kind: crate::types::DecorationKind::Background,
@@ -376,25 +388,25 @@ fn render_frame_layout(
             }
             crate::layout::frame::FrameBorderStyle::Full => {
                 // Top
-                render_frame.decorations.push(crate::types::DecorationRect {
+                decorations.push(crate::types::DecorationRect {
                     rect: [fx, fy, fw, bw],
                     color,
                     kind: crate::types::DecorationKind::Background,
                 });
                 // Bottom
-                render_frame.decorations.push(crate::types::DecorationRect {
+                decorations.push(crate::types::DecorationRect {
                     rect: [fx, fy + fh - bw, fw, bw],
                     color,
                     kind: crate::types::DecorationKind::Background,
                 });
                 // Left
-                render_frame.decorations.push(crate::types::DecorationRect {
+                decorations.push(crate::types::DecorationRect {
                     rect: [fx, fy, bw, fh],
                     color,
                     kind: crate::types::DecorationKind::Background,
                 });
                 // Right
-                render_frame.decorations.push(crate::types::DecorationRect {
+                decorations.push(crate::types::DecorationRect {
                     rect: [fx + fw - bw, fy, bw, fh],
                     color,
                     kind: crate::types::DecorationKind::Background,

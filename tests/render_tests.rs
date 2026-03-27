@@ -1876,3 +1876,93 @@ fn frame_with_nested_table_renders() {
         frame.glyphs.len()
     );
 }
+
+#[test]
+fn render_block_only_preserves_table_decorations() {
+    let mut ts = setup();
+    // Layout: block 1 + table + block 2
+    ts.layout_blocks(vec![make_block(1, "First block")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 2,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![make_cell(0, 0, "A"), make_cell(0, 1, "B")],
+    });
+
+    // Full render: should produce table border decorations
+    let frame = ts.render();
+    let borders_full: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::TableBorder)
+        .collect();
+    assert!(
+        !borders_full.is_empty(),
+        "full render should produce table border decorations"
+    );
+    let border_count = borders_full.len();
+
+    // render_block_only should still include table decorations
+    let frame = ts.render_block_only(1);
+    let borders_after: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::TableBorder)
+        .collect();
+    assert_eq!(
+        borders_after.len(),
+        border_count,
+        "render_block_only should preserve table border decorations"
+    );
+}
+
+#[test]
+fn render_block_only_preserves_frame_decorations() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block(1, "First block")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::Full,
+        blocks: vec![make_block(2, "Frame content")],
+        tables: vec![],
+    });
+
+    // Full render: should produce frame border decorations (Background kind)
+    let frame = ts.render();
+    let bg_decos_full: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::Background)
+        .collect();
+    assert!(
+        !bg_decos_full.is_empty(),
+        "full render should produce frame border decorations"
+    );
+    let bg_count = bg_decos_full.len();
+
+    // render_block_only should still include frame border decorations
+    let frame = ts.render_block_only(1);
+    let bg_decos_after: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::Background)
+        .collect();
+    assert_eq!(
+        bg_decos_after.len(),
+        bg_count,
+        "render_block_only should preserve frame border decorations"
+    );
+}

@@ -1,7 +1,7 @@
 use crate::atlas::allocator::GlyphAtlas;
 use crate::atlas::cache::GlyphCache;
 use crate::font::registry::FontRegistry;
-use crate::layout::flow::FlowLayout;
+use crate::layout::flow::{FlowItem, FlowLayout};
 use crate::types::{BlockVisualInfo, CursorDisplay, FontFaceId, HitTestResult, RenderFrame};
 
 /// How the content (layout) width is determined.
@@ -467,6 +467,33 @@ impl Typesetter {
         for (_, decos) in &self.render_frame.block_decorations {
             self.render_frame.decorations.extend_from_slice(decos);
         }
+
+        // Regenerate table and frame decorations (these are not stored in
+        // per-block caches, only in the flat decorations vec during full render).
+        for item in &self.flow_layout.flow_order {
+            match item {
+                FlowItem::Table { table_id, .. } => {
+                    if let Some(table) = self.flow_layout.tables.get(table_id) {
+                        let decos = crate::layout::table::generate_table_decorations(
+                            table,
+                            self.scroll_offset,
+                        );
+                        self.render_frame.decorations.extend(decos);
+                    }
+                }
+                FlowItem::Frame { frame_id, .. } => {
+                    if let Some(frame) = self.flow_layout.frames.get(frame_id) {
+                        crate::render::frame::append_frame_border_decorations(
+                            frame,
+                            self.scroll_offset,
+                            &mut self.render_frame.decorations,
+                        );
+                    }
+                }
+                FlowItem::Block { .. } => {}
+            }
+        }
+
         let cursor_decos = crate::render::cursor::generate_cursor_decorations(
             &self.flow_layout,
             &self.cursors,
