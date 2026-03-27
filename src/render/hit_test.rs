@@ -14,6 +14,11 @@ pub fn hit_test(flow: &FlowLayout, scroll_offset: f32, x: f32, y: f32) -> Option
         return Some(result);
     }
 
+    // Try tables
+    if let Some(result) = hit_test_in_table(flow, doc_y, x) {
+        return Some(result);
+    }
+
     // Fall back to top-level blocks
     let (block_id, block) = find_block_at_y(flow, doc_y)?;
     hit_test_block(block_id, block, doc_y, x, 0.0, 0.0)
@@ -37,13 +42,49 @@ pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f3
         }
     }
 
-    // Search frame blocks
+    // Search table cell blocks
+    for table in flow.tables.values() {
+        for cell in &table.cell_layouts {
+            if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
+                continue;
+            }
+            let offset_x = table.column_xs[cell.column];
+            let offset_y = table.y + table.row_ys[cell.row];
+            for block in &cell.blocks {
+                if let Some(rect) =
+                    caret_rect_in_block(block, position, scroll_offset, offset_x, offset_y)
+                {
+                    return rect;
+                }
+            }
+        }
+    }
+
+    // Search frame blocks and tables inside frames
     for frame in flow.frames.values() {
-        let offset_x = frame.x + frame.content_x;
-        let offset_y = frame.y + frame.content_y;
+        let fx = frame.x + frame.content_x;
+        let fy = frame.y + frame.content_y;
         for block in &frame.blocks {
-            if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, offset_x, offset_y) {
+            if let Some(rect) =
+                caret_rect_in_block(block, position, scroll_offset, fx, fy)
+            {
                 return rect;
+            }
+        }
+        for table in &frame.tables {
+            for cell in &table.cell_layouts {
+                if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
+                    continue;
+                }
+                let offset_x = fx + table.column_xs[cell.column];
+                let offset_y = fy + table.y + table.row_ys[cell.row];
+                for block in &cell.blocks {
+                    if let Some(rect) =
+                        caret_rect_in_block(block, position, scroll_offset, offset_x, offset_y)
+                    {
+                        return rect;
+                    }
+                }
             }
         }
     }
@@ -118,7 +159,7 @@ fn hit_test_block(
     })
 }
 
-/// Try to hit-test within frame blocks.
+/// Try to hit-test within frame blocks and tables inside frames.
 fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestResult> {
     for item in &flow.flow_order {
         let frame_id = match item {
@@ -134,6 +175,17 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
         let offset_y = frame.y + frame.content_y;
         let local_y = doc_y - offset_y;
 
+        // Try tables inside the frame first
+        for table in &frame.tables {
+            if local_y >= table.y
+                && local_y < table.y + table.total_height
+                && let Some(result) =
+                    hit_test_table_content(table, doc_y, x, offset_x, offset_y)
+            {
+                return Some(result);
+            }
+        }
+
         // Find block at local_y within frame
         for block in &frame.blocks {
             let block_bottom = block.y + block.height;
@@ -145,6 +197,92 @@ fn hit_test_in_frame(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestRes
         // Fallback: last block in frame
         if let Some(block) = frame.blocks.last() {
             return hit_test_block(block.block_id, block, doc_y, x, offset_x, offset_y);
+        }
+    }
+    None
+}
+
+/// Try to hit-test within top-level table cells.
+fn hit_test_in_table(flow: &FlowLayout, doc_y: f32, x: f32) -> Option<HitTestResult> {
+    for item in &flow.flow_order {
+        let table_id = match item {
+            FlowItem::Table {
+                table_id,
+                y,
+                height,
+            } if doc_y >= *y && doc_y < *y + *height => *table_id,
+            _ => continue,
+        };
+        let table = flow.tables.get(&table_id)?;
+        return hit_test_table_content(table, doc_y, x, 0.0, 0.0);
+    }
+    None
+}
+
+/// Hit-test within a table's cells. `base_x`/`base_y` are added when
+/// the table lives inside a frame.
+fn hit_test_table_content(
+    table: &crate::layout::table::TableLayout,
+    doc_y: f32,
+    x: f32,
+    base_x: f32,
+    base_y: f32,
+) -> Option<HitTestResult> {
+    let local_y = doc_y - base_y - table.y;
+    let local_x = x - base_x;
+
+    // Find row
+    let row = find_table_row(table, local_y)?;
+    // Find column
+    let col = find_table_column(table, local_x)?;
+
+    // Find the cell at (row, col)
+    let cell = table
+        .cell_layouts
+        .iter()
+        .find(|c| c.row == row && c.column == col)?;
+
+    let cell_x = base_x + table.column_xs[col];
+    let cell_y = base_y + table.y + table.row_ys[row];
+
+    // Find block within the cell
+    let cell_local_y = doc_y - cell_y;
+    for block in &cell.blocks {
+        let block_bottom = block.y + block.height;
+        if cell_local_y >= block.y && cell_local_y < block_bottom {
+            return hit_test_block(block.block_id, block, doc_y, x, cell_x, cell_y);
+        }
+    }
+
+    // Fallback: last block in cell
+    if let Some(block) = cell.blocks.last() {
+        return hit_test_block(block.block_id, block, doc_y, x, cell_x, cell_y);
+    }
+
+    None
+}
+
+/// Find which row a local y coordinate falls into.
+fn find_table_row(table: &crate::layout::table::TableLayout, local_y: f32) -> Option<usize> {
+    for (r, &row_y) in table.row_ys.iter().enumerate() {
+        let row_top = row_y - table.cell_padding;
+        let row_bottom = row_y + table.row_heights.get(r).copied().unwrap_or(0.0) + table.cell_padding;
+        if local_y >= row_top && local_y < row_bottom {
+            return Some(r);
+        }
+    }
+    None
+}
+
+/// Find which column a local x coordinate falls into.
+fn find_table_column(table: &crate::layout::table::TableLayout, local_x: f32) -> Option<usize> {
+    for (c, &col_x) in table.column_xs.iter().enumerate() {
+        let col_left = col_x - table.cell_padding;
+        let col_right = col_x
+            + table.column_content_widths.get(c).copied().unwrap_or(0.0)
+            + table.cell_padding;
+        if local_x >= col_left && local_x < col_right {
+            return Some(c);
         }
     }
     None

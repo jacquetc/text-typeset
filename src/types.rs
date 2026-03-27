@@ -163,6 +163,7 @@ pub struct HitTestResult {
 }
 
 /// What region of the layout a hit test landed in.
+#[derive(Debug)]
 pub enum HitRegion {
     /// Inside a text run (normal text content).
     Text,

@@ -793,3 +793,124 @@ fn selection_highlights_text_inside_frame() {
         "selection inside a frame should produce selection rects"
     );
 }
+
+// ── Table hit-testing ──────────────────────────────────────────
+
+#[test]
+fn hit_test_inside_table_cell_returns_correct_block() {
+    let mut ts = setup();
+    // Block at position 0, text "AB" (2 chars + separator = next pos 3)
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![make_cell_at(0, 0, 100, 3, "Hello")],
+    });
+    ts.render();
+
+    // The table starts below block 1. Hit-test in the table area.
+    let block1_info = ts.block_visual_info(1).unwrap();
+    let table_y = block1_info.y + block1_info.height;
+    // Hit at screen coords: x in the middle of the cell, y inside the table
+    let result = ts.hit_test(50.0, table_y + 10.0);
+    assert!(result.is_some(), "hit test inside table cell should return a result");
+    let result = result.unwrap();
+    assert_eq!(
+        result.block_id, 100,
+        "hit test should return the table cell block id"
+    );
+    assert!(
+        result.position >= 3,
+        "position should be >= 3 (start of cell text)"
+    );
+}
+
+#[test]
+fn hit_test_returns_text_region_for_table_cell_content() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![make_cell_at(0, 0, 100, 3, "Hello")],
+    });
+    ts.render();
+
+    let block1_info = ts.block_visual_info(1).unwrap();
+    let table_y = block1_info.y + block1_info.height;
+    let result = ts.hit_test(50.0, table_y + 10.0).unwrap();
+    assert!(
+        matches!(result.region, HitRegion::Text | HitRegion::PastLineEnd),
+        "hit test on table cell text should return Text or PastLineEnd region, got {:?}",
+        result.region
+    );
+}
+
+// ── Caret rect in tables ───────────────────────────────────────
+
+#[test]
+fn caret_rect_inside_table_cell_has_valid_position() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![make_cell_at(0, 0, 100, 3, "Hello")],
+    });
+    ts.render();
+
+    // Caret at position 3 (start of "Hello" in cell)
+    let rect = ts.caret_rect(3);
+    let block1_info = ts.block_visual_info(1).unwrap();
+    let table_top = block1_info.y + block1_info.height;
+
+    // Caret y should be in the table area (below block 1)
+    assert!(
+        rect[1] >= table_top - 5.0,
+        "caret rect y ({}) should be at or below the table top ({})",
+        rect[1],
+        table_top
+    );
+    assert!(rect[3] > 0.0, "caret height should be positive");
+}
+
+#[test]
+fn caret_rect_inside_table_advances_with_position() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_table(&TableLayoutParams {
+        table_id: 10,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![make_cell_at(0, 0, 100, 3, "Hello")],
+    });
+    ts.render();
+
+    let rect_start = ts.caret_rect(3); // start of "Hello"
+    let rect_mid = ts.caret_rect(5); // middle of "Hello"
+    assert!(
+        rect_mid[0] > rect_start[0],
+        "caret at position 5 ({}) should be right of position 3 ({})",
+        rect_mid[0],
+        rect_start[0]
+    );
+}
