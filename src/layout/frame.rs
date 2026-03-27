@@ -27,6 +27,18 @@ pub enum FramePosition {
     Absolute,
 }
 
+/// How the frame border is drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FrameBorderStyle {
+    /// Draw border on all four sides (default).
+    #[default]
+    Full,
+    /// Draw only the left border (blockquote style).
+    LeftOnly,
+    /// No border.
+    None,
+}
+
 /// Parameters for a frame, extracted from text-document's FrameSnapshot.
 pub struct FrameLayoutParams {
     pub frame_id: usize,
@@ -41,6 +53,7 @@ pub struct FrameLayoutParams {
     pub margin_right: f32,
     pub padding: f32,
     pub border_width: f32,
+    pub border_style: FrameBorderStyle,
     /// Nested flow elements: blocks and tables within the frame.
     pub blocks: Vec<BlockLayoutParams>,
     pub tables: Vec<(usize, TableLayoutParams)>, // (flow_index, params) for ordering
@@ -60,6 +73,7 @@ pub struct FrameLayout {
     pub blocks: Vec<BlockLayout>,
     pub tables: Vec<TableLayout>,
     pub border_width: f32,
+    pub border_style: FrameBorderStyle,
 }
 
 /// Lay out a frame: compute dimensions, lay out nested content.
@@ -123,5 +137,6 @@ pub fn layout_frame(
         blocks,
         tables,
         border_width: border,
+        border_style: params.border_style,
     }
 }

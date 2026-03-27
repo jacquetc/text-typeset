@@ -33,6 +33,7 @@ pub fn build_render_frame(
     render_frame.block_glyphs.clear();
     render_frame.block_decorations.clear();
     render_frame.block_images.clear();
+    render_frame.block_heights.clear();
 
     // Advance generation and evict stale glyphs
     cache.advance_generation();
@@ -140,6 +141,9 @@ pub fn build_render_frame(
                 .block_decorations
                 .push((block_id, decos.clone()));
             render_frame.decorations.extend(decos);
+
+            // Snapshot block height for incremental render height-change detection
+            render_frame.block_heights.insert(block_id, block.height);
         }
     }
 
@@ -348,37 +352,56 @@ fn render_frame_layout(
     }
 
     // Frame border decorations
-    if frame.border_width > 0.0 {
+    if frame.border_width > 0.0
+        && frame.border_style != crate::layout::frame::FrameBorderStyle::None
+    {
         let bw = frame.border_width;
         let fx = frame.x;
         let fy = frame.y - scroll_offset;
         let fw = frame.total_width;
         let fh = frame.total_height;
-        let color = [0.6, 0.6, 0.6, 1.0];
-        // Top
-        render_frame.decorations.push(crate::types::DecorationRect {
-            rect: [fx, fy, fw, bw],
-            color,
-            kind: crate::types::DecorationKind::Background,
-        });
-        // Bottom
-        render_frame.decorations.push(crate::types::DecorationRect {
-            rect: [fx, fy + fh - bw, fw, bw],
-            color,
-            kind: crate::types::DecorationKind::Background,
-        });
-        // Left
-        render_frame.decorations.push(crate::types::DecorationRect {
-            rect: [fx, fy, bw, fh],
-            color,
-            kind: crate::types::DecorationKind::Background,
-        });
-        // Right
-        render_frame.decorations.push(crate::types::DecorationRect {
-            rect: [fx + fw - bw, fy, bw, fh],
-            color,
-            kind: crate::types::DecorationKind::Background,
-        });
+        let color = match frame.border_style {
+            crate::layout::frame::FrameBorderStyle::LeftOnly => [0.5, 0.5, 0.6, 1.0],
+            _ => [0.6, 0.6, 0.6, 1.0],
+        };
+
+        match frame.border_style {
+            crate::layout::frame::FrameBorderStyle::LeftOnly => {
+                // Blockquote style: left border only
+                render_frame.decorations.push(crate::types::DecorationRect {
+                    rect: [fx, fy, bw, fh],
+                    color,
+                    kind: crate::types::DecorationKind::Background,
+                });
+            }
+            crate::layout::frame::FrameBorderStyle::Full => {
+                // Top
+                render_frame.decorations.push(crate::types::DecorationRect {
+                    rect: [fx, fy, fw, bw],
+                    color,
+                    kind: crate::types::DecorationKind::Background,
+                });
+                // Bottom
+                render_frame.decorations.push(crate::types::DecorationRect {
+                    rect: [fx, fy + fh - bw, fw, bw],
+                    color,
+                    kind: crate::types::DecorationKind::Background,
+                });
+                // Left
+                render_frame.decorations.push(crate::types::DecorationRect {
+                    rect: [fx, fy, bw, fh],
+                    color,
+                    kind: crate::types::DecorationKind::Background,
+                });
+                // Right
+                render_frame.decorations.push(crate::types::DecorationRect {
+                    rect: [fx + fw - bw, fy, bw, fh],
+                    color,
+                    kind: crate::types::DecorationKind::Background,
+                });
+            }
+            crate::layout::frame::FrameBorderStyle::None => {}
+        }
     }
 }
 

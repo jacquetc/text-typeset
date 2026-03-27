@@ -146,6 +146,13 @@ impl FontRegistry {
         self.fontdb_id_to_face_id(fontdb_id)
     }
 
+    /// Look up the family name of a registered font.
+    pub fn font_family_name(&self, face_id: FontFaceId) -> Option<String> {
+        let entry = self.get(face_id)?;
+        let face_info = self.fontdb.face(entry.fontdb_id)?;
+        face_info.families.first().map(|(name, _)| name.clone())
+    }
+
     /// Look up a FontEntry by FontFaceId.
     pub fn get(&self, face_id: FontFaceId) -> Option<&FontEntry> {
         self.fonts

@@ -41,6 +41,8 @@ pub struct RenderFrame {
     pub(crate) block_decorations: Vec<(usize, Vec<DecorationRect>)>,
     /// Per-block image data for incremental updates.
     pub(crate) block_images: Vec<(usize, Vec<ImageQuad>)>,
+    /// Per-block height snapshot for detecting height changes in incremental render.
+    pub(crate) block_heights: std::collections::HashMap<usize, f32>,
 }
 
 /// A positioned glyph to draw as a textured quad from the atlas.
@@ -227,6 +229,7 @@ impl RenderFrame {
             block_glyphs: Vec::new(),
             block_decorations: Vec::new(),
             block_images: Vec::new(),
+            block_heights: std::collections::HashMap::new(),
         }
     }
 }

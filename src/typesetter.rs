@@ -137,6 +137,11 @@ impl Typesetter {
         self.font_registry.set_generic_family(generic, family);
     }
 
+    /// Look up the family name of a registered font by its face ID.
+    pub fn font_family_name(&self, face_id: FontFaceId) -> Option<String> {
+        self.font_registry.font_family_name(face_id)
+    }
+
     /// Access the font registry for advanced queries (glyph coverage, fallback, etc.).
     pub fn font_registry(&self) -> &FontRegistry {
         &self.font_registry
@@ -335,7 +340,25 @@ impl Typesetter {
     /// Reuses cached glyph/decoration data for all other blocks from the
     /// last full `render()`. Use after `relayout_block()` when only one
     /// block's text changed.
+    ///
+    /// If the block's height changed (causing subsequent blocks to shift),
+    /// this falls back to a full `render()` since cached glyph positions
+    /// for other blocks would be stale.
     pub fn render_block_only(&mut self, block_id: usize) -> &RenderFrame {
+        // If the block's height changed, cached glyph positions for subsequent
+        // blocks are stale. Fall back to a full re-render.
+        if let Some(block) = self.flow_layout.blocks.get(&block_id) {
+            let old_height = self
+                .render_frame
+                .block_heights
+                .get(&block_id)
+                .copied()
+                .unwrap_or(block.height);
+            if (block.height - old_height).abs() > 0.001 {
+                return self.render();
+            }
+        }
+
         // Re-render just this block's glyphs into a temporary frame
         let mut new_glyphs = Vec::new();
         let mut new_images = Vec::new();

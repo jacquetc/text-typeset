@@ -1,5 +1,5 @@
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
-use text_typeset::layout::frame::{FrameLayoutParams, FramePosition};
+use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::{Typesetter, UnderlineStyle, VerticalAlignment};
@@ -1227,6 +1227,7 @@ fn frame_renders_nested_block_glyphs() {
         margin_right: 0.0,
         padding: 8.0,
         border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Inside frame")],
         tables: vec![],
     });
@@ -1254,6 +1255,7 @@ fn frame_contributes_to_content_height() {
         margin_right: 0.0,
         padding: 8.0,
         border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Content")],
         tables: vec![],
     });
@@ -1282,6 +1284,7 @@ fn block_then_frame_renders_frame_below() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 0.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Below")],
         tables: vec![],
     });
@@ -1313,6 +1316,7 @@ fn frame_with_border_produces_decorations() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 2.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Bordered")],
         tables: vec![],
     });
@@ -1345,6 +1349,7 @@ fn float_right_frame_positioned_at_right_edge() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 0.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Right")],
         tables: vec![],
     });
@@ -1381,6 +1386,7 @@ fn absolute_frame_does_not_affect_content_height() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 0.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Floating")],
         tables: vec![],
     });
@@ -1492,6 +1498,7 @@ fn underline_inside_frame_produces_decoration() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 0.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![BlockLayoutParams {
             block_id: 2,
             position: 0,
@@ -1711,6 +1718,7 @@ fn float_left_frame_renders() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 0.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("FloatL")],
         tables: vec![],
     });
@@ -1845,6 +1853,7 @@ fn frame_with_nested_table_renders() {
         margin_right: 0.0,
         padding: 4.0,
         border_width: 1.0,
+        border_style: FrameBorderStyle::Full,
         blocks: vec![make_frame_block("Before table")],
         tables: vec![(
             1,

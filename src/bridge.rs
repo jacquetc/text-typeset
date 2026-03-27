@@ -110,13 +110,21 @@ pub fn convert_block(block: &BlockSnapshot) -> BlockLayoutParams {
             .map(|&t| t as f32)
             .collect(),
         line_height_multiplier: block.block_format.line_height,
-        non_breakable_lines: block.block_format.non_breakable_lines.unwrap_or(false),
+        non_breakable_lines: block.block_format.non_breakable_lines.unwrap_or(false)
+            || block.block_format.is_code_block == Some(true),
         checkbox,
         background_color: block
             .block_format
             .background_color
             .as_ref()
-            .and_then(|s| parse_css_color(s)),
+            .and_then(|s| parse_css_color(s))
+            .or_else(|| {
+                if block.block_format.is_code_block == Some(true) {
+                    Some([0.95, 0.95, 0.95, 1.0])
+                } else {
+                    None
+                }
+            }),
     }
 }
 
@@ -401,17 +409,36 @@ pub fn convert_frame(frame: &FrameSnapshot) -> FrameLayoutParams {
         Some(text_document::FramePosition::FloatRight) => FramePosition::FloatRight,
     };
 
+    let is_blockquote = frame.format.is_blockquote == Some(true);
+
     FrameLayoutParams {
         frame_id: frame.frame_id,
         position,
         width: frame.format.width.map(|w| w as f32),
         height: frame.format.height.map(|h| h as f32),
-        margin_top: frame.format.top_margin.unwrap_or(0) as f32,
-        margin_bottom: frame.format.bottom_margin.unwrap_or(0) as f32,
-        margin_left: frame.format.left_margin.unwrap_or(0) as f32,
+        margin_top: frame.format.top_margin.unwrap_or(if is_blockquote { 4 } else { 0 }) as f32,
+        margin_bottom: frame
+            .format
+            .bottom_margin
+            .unwrap_or(if is_blockquote { 4 } else { 0 }) as f32,
+        margin_left: frame
+            .format
+            .left_margin
+            .unwrap_or(if is_blockquote { 16 } else { 0 }) as f32,
         margin_right: frame.format.right_margin.unwrap_or(0) as f32,
-        padding: frame.format.padding.unwrap_or(0) as f32,
-        border_width: frame.format.border.unwrap_or(0) as f32,
+        padding: frame
+            .format
+            .padding
+            .unwrap_or(if is_blockquote { 8 } else { 0 }) as f32,
+        border_width: frame
+            .format
+            .border
+            .unwrap_or(if is_blockquote { 3 } else { 0 }) as f32,
+        border_style: if is_blockquote {
+            crate::layout::frame::FrameBorderStyle::LeftOnly
+        } else {
+            crate::layout::frame::FrameBorderStyle::Full
+        },
         blocks,
         tables,
     }
