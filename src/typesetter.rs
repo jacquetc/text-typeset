@@ -48,6 +48,7 @@ pub struct Typesetter {
     scale_context: swash::scale::ScaleContext,
     render_frame: RenderFrame,
     scroll_offset: f32,
+    rendered_scroll_offset: f32,
     viewport_width: f32,
     viewport_height: f32,
     content_width_mode: ContentWidthMode,
@@ -70,6 +71,7 @@ impl Typesetter {
             scale_context: swash::scale::ScaleContext::new(),
             render_frame: RenderFrame::new(),
             scroll_offset: 0.0,
+            rendered_scroll_offset: f32::NAN,
             viewport_width: 0.0,
             viewport_height: 0.0,
             content_width_mode: ContentWidthMode::Auto,
@@ -332,6 +334,7 @@ impl Typesetter {
             self.selection_color,
             &mut self.render_frame,
         );
+        self.rendered_scroll_offset = self.scroll_offset;
         &self.render_frame
     }
 
@@ -345,6 +348,11 @@ impl Typesetter {
     /// this falls back to a full `render()` since cached glyph positions
     /// for other blocks would be stale.
     pub fn render_block_only(&mut self, block_id: usize) -> &RenderFrame {
+        // If scroll offset changed, all cached glyph positions are stale.
+        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001 {
+            return self.render();
+        }
+
         // Frame blocks are cached per-frame (keyed by frame_id) and their
         // internal decorations aren't stored in block_decorations. Fall back
         // to a full render which correctly handles frame content, height
@@ -446,7 +454,15 @@ impl Typesetter {
     ///
     /// Reuses the existing glyph quads and images from the last full `render()`.
     /// Use this when only the cursor blinked or selection changed, not the text.
+    ///
+    /// If the scroll offset changed since the last full render, falls back to
+    /// a full [`render`](Self::render) so that glyph positions are updated.
     pub fn render_cursor_only(&mut self) -> &RenderFrame {
+        // If scroll offset changed, glyph quads are stale - need full re-render
+        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001 {
+            return self.render();
+        }
+
         // Remove old cursor/selection decorations, keep block decorations
         self.render_frame.decorations.retain(|d| {
             !matches!(

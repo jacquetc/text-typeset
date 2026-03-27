@@ -676,6 +676,74 @@ fn scroll_offset_shifts_glyph_y() {
     );
 }
 
+#[test]
+fn render_cursor_only_falls_back_when_scroll_offset_changed() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let blocks: Vec<_> = (0..10)
+        .map(|i| make_block(i, &format!("Paragraph {i} with some text.")))
+        .collect();
+    ts.layout_blocks(blocks);
+
+    ts.set_scroll_offset(0.0);
+    let frame = ts.render();
+    assert!(!frame.glyphs.is_empty());
+    let y_at_0 = frame.glyphs[0].screen[1];
+
+    // Change scroll offset then call render_cursor_only
+    ts.set_scroll_offset(5.0);
+    let frame = ts.render_cursor_only();
+    assert!(!frame.glyphs.is_empty());
+    let y_after = frame.glyphs[0].screen[1];
+
+    let diff = y_at_0 - y_after;
+    assert!(
+        (diff - 5.0).abs() < 1.0,
+        "render_cursor_only should fall back to full render when scroll offset changed: \
+         y0={}, y_after={}, diff={}",
+        y_at_0,
+        y_after,
+        diff
+    );
+}
+
+#[test]
+fn render_block_only_falls_back_when_scroll_offset_changed() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let blocks: Vec<_> = (0..10)
+        .map(|i| make_block(i, &format!("Paragraph {i} with some text.")))
+        .collect();
+    ts.layout_blocks(blocks.clone());
+
+    ts.set_scroll_offset(0.0);
+    let frame = ts.render();
+    assert!(!frame.glyphs.is_empty());
+    let y_at_0 = frame.glyphs[0].screen[1];
+
+    // Change scroll offset then call render_block_only
+    ts.set_scroll_offset(5.0);
+    let frame = ts.render_block_only(0);
+    assert!(!frame.glyphs.is_empty());
+    let y_after = frame.glyphs[0].screen[1];
+
+    let diff = y_at_0 - y_after;
+    assert!(
+        (diff - 5.0).abs() < 1.0,
+        "render_block_only should fall back to full render when scroll offset changed: \
+         y0={}, y_after={}, diff={}",
+        y_at_0,
+        y_after,
+        diff
+    );
+}
+
 // ── List tests ──────────────────────────────────────────────────
 
 #[test]
