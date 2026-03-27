@@ -81,6 +81,9 @@ jobs:
         with:
           shared-key: ${{ matrix.name }}
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Build
         run: cargo build --workspace --all-targets
 
@@ -115,6 +118,9 @@ jobs:
         with:
           shared-key: check-${{ matrix.name }}
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Check
         run: cargo check --workspace --all-targets ${{ matrix.flags }}
 
@@ -131,6 +137,9 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
 
       - name: Check documentation
         env:
@@ -169,6 +178,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings -A deprecated
 
@@ -190,6 +202,9 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
 
       - name: Collect coverage data
         run: cargo llvm-cov --workspace --lcov --no-cfg-coverage --output-path lcov.info

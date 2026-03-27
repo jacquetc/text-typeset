@@ -16,4 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: taiki-e/install-action@cargo-audit
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
       - run: cargo audit

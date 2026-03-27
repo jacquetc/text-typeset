@@ -55,6 +55,9 @@ jobs:
         with:
           shared-key: next-${{ matrix.name }}
 
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
+
       - name: Build
         run: cargo build --workspace --all-targets
 
@@ -106,6 +109,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy-${{ matrix.rust }}
+
+      - name: Strip path dependencies
+        uses: ./.github/actions/strip-path-deps
 
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings -A deprecated
