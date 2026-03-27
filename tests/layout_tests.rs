@@ -948,38 +948,6 @@ fn relayout_table_block_updates_table_height() {
             background_color: None,
         }],
     });
-    ts.layout_blocks(vec![make_block_at(1, 0, "Before")]);
-    ts.add_table(&TableLayoutParams {
-        table_id: 10,
-        rows: 1,
-        columns: 1,
-        column_widths: vec![],
-        border_width: 1.0,
-        cell_spacing: 0.0,
-        cell_padding: 4.0,
-        cells: vec![CellLayoutParams {
-            row: 0,
-            column: 0,
-            blocks: vec![make_block_at(100, 7, "Short")],
-            background_color: None,
-        }],
-    });
-    // Add a block after the table
-    ts.add_table(&TableLayoutParams {
-        table_id: 10,
-        rows: 1,
-        columns: 1,
-        column_widths: vec![],
-        border_width: 1.0,
-        cell_spacing: 0.0,
-        cell_padding: 4.0,
-        cells: vec![CellLayoutParams {
-            row: 0,
-            column: 0,
-            blocks: vec![make_block_at(100, 7, "Short")],
-            background_color: None,
-        }],
-    });
 
     let height_before = ts.content_height();
 
