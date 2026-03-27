@@ -350,3 +350,232 @@ fn content_height_grows_with_content() {
         h2
     );
 }
+
+// ── Cursor movement across frame (blockquote) boundaries ───────
+
+#[test]
+fn hit_test_below_blockquote_lands_on_block_after() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("Before\n\n> Quoted text\n\nAfter")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Hit test near the bottom of the viewport - "After" should be there
+    let content_h = ts.content_height();
+    let result = ts.hit_test(10.0, content_h - 5.0);
+    assert!(result.is_some(), "hit test near bottom should return a result");
+    let hit = result.unwrap();
+    // The last block "After" should be hit, not the blockquote's block
+    assert!(
+        hit.position >= "Before\n\n> Quoted text\n\n".len() - 5,
+        "hit test at bottom should be in the 'After' block, got position {}",
+        hit.position
+    );
+}
+
+#[test]
+fn caret_rect_moves_through_blockquote() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("AB\n\n> CD\n\nEF")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Caret at position 0 ("A") should be at the top
+    let rect_before = ts.caret_rect(0);
+    // Find a position inside the blockquote
+    // The blockquote text "CD" is somewhere in the middle of the document
+    let rect_quote = ts.caret_rect(4);
+    // Find a position after the blockquote
+    let rect_after = ts.caret_rect(8);
+
+    // Each successive caret should be below the previous
+    assert!(
+        rect_quote[1] > rect_before[1],
+        "caret in blockquote ({}) should be below caret before ({})",
+        rect_quote[1],
+        rect_before[1]
+    );
+    assert!(
+        rect_after[1] > rect_quote[1],
+        "caret after blockquote ({}) should be below caret in blockquote ({})",
+        rect_after[1],
+        rect_quote[1]
+    );
+    // All carets should have valid dimensions
+    assert!(rect_before[3] > 0.0);
+    assert!(rect_quote[3] > 0.0);
+    assert!(rect_after[3] > 0.0);
+}
+
+#[test]
+fn selection_spanning_blockquote_boundary() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("AB\n\n> CD\n\nEF")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+
+    // Select from "AB" through the blockquote into "EF"
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: 0,
+        anchor: 10,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let selections: Vec<_> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == text_typeset::DecorationKind::Selection)
+        .collect();
+    assert!(
+        selections.len() >= 2,
+        "cross-blockquote selection should produce multiple rects, got {}",
+        selections.len()
+    );
+}
+
+#[test]
+fn ensure_caret_visible_inside_blockquote() {
+    let doc = TextDocument::new();
+    // Create enough content to require scrolling
+    let mut md = String::new();
+    for i in 0..20 {
+        md.push_str(&format!("Paragraph {}.\n\n", i));
+    }
+    md.push_str("> Deep blockquote text\n\n");
+    md.push_str("Final paragraph.");
+    let op = doc.set_markdown(&md).unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 50.0); // very short viewport
+
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find a position deep in the document via hit_test
+    let h = ts.content_height();
+    let hit = ts.hit_test(10.0, h - 5.0);
+    assert!(hit.is_some(), "should find content at bottom");
+    let deep_pos = hit.unwrap().position;
+
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: deep_pos,
+        anchor: deep_pos,
+        visible: true,
+    });
+
+    let result = ts.ensure_caret_visible();
+    assert!(
+        result.is_some(),
+        "should need to scroll to reveal caret near bottom of long document"
+    );
+    assert!(result.unwrap() > 0.0, "scroll offset should be positive");
+}
+
+#[test]
+fn caret_rect_after_edit_inside_blockquote() {
+    let doc = TextDocument::new();
+    let op = doc
+        .set_markdown("Before\n\n> Short\n\nAfter")
+        .unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(200.0, 600.0); // narrow viewport to force wrapping
+
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Find the "After" block position via hit_test at the bottom of the content
+    let h = ts.content_height();
+    let after_hit = ts.hit_test(10.0, h - 5.0);
+    assert!(after_hit.is_some(), "should find the After block");
+    let after_pos = after_hit.unwrap().position;
+    let rect_before_edit = ts.caret_rect(after_pos);
+    assert!(
+        rect_before_edit[3] > 0.0,
+        "caret for 'After' should have valid height before edit"
+    );
+
+    // Edit the blockquote to make it much longer
+    let doc2 = TextDocument::new();
+    let op = doc2
+        .set_markdown("Before\n\n> This is a much longer blockquote that takes more vertical space than the short one did before\n\nAfter")
+        .unwrap();
+    op.wait().unwrap();
+    let flow2 = doc2.snapshot_flow();
+    ts.layout_full(&flow2);
+    ts.render();
+
+    // Find the "After" position again in the new layout
+    let h2 = ts.content_height();
+    let after_hit2 = ts.hit_test(10.0, h2 - 5.0);
+    assert!(after_hit2.is_some(), "should find After block in new layout");
+    let after_pos2 = after_hit2.unwrap().position;
+    let rect_after_edit = ts.caret_rect(after_pos2);
+
+    assert!(
+        rect_after_edit[3] > 0.0,
+        "caret after edit should have valid height"
+    );
+    // The caret for "After" should have moved down since the blockquote grew
+    assert!(
+        rect_after_edit[1] > rect_before_edit[1],
+        "caret for 'After' should move down after blockquote grows: {} -> {}",
+        rect_before_edit[1],
+        rect_after_edit[1]
+    );
+}
+
+#[test]
+fn scroll_to_position_inside_blockquote() {
+    let doc = TextDocument::new();
+    let mut md = String::new();
+    for i in 0..15 {
+        md.push_str(&format!("Paragraph {}.\n\n", i));
+    }
+    md.push_str("> Blockquote deep in document\n\n");
+    let op = doc.set_markdown(&md).unwrap();
+    op.wait().unwrap();
+    let flow = doc.snapshot_flow();
+
+    let mut ts = setup_typesetter();
+    ts.layout_full(&flow);
+    ts.render();
+
+    // Use hit_test to find a position deep in the document
+    let h = ts.content_height();
+    let hit = ts.hit_test(10.0, h - 5.0);
+    assert!(hit.is_some());
+    let deep_pos = hit.unwrap().position;
+
+    let offset = ts.scroll_to_position(deep_pos);
+    assert!(
+        offset > 0.0,
+        "scroll_to_position inside blockquote should produce positive offset"
+    );
+}

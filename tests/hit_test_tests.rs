@@ -535,11 +535,9 @@ fn hit_test_below_all_content() {
     );
     let result = result.unwrap();
     assert!(
-        matches!(
-            result.region,
-            HitRegion::BelowContent | HitRegion::PastLineEnd | HitRegion::Text
-        ),
-        "should be below content or past line end"
+        matches!(result.region, HitRegion::BelowContent),
+        "far below content should be BelowContent, got {:?}",
+        result.region
     );
 }
 
@@ -573,6 +571,8 @@ fn hit_test_between_blocks_below_content() {
     // Click in the gap below the block's content but within its margin
     let result = ts.hit_test(10.0, 50.0);
     assert!(result.is_some());
+    let hit = result.unwrap();
+    assert_eq!(hit.block_id, 1, "should return the only block");
 }
 
 #[test]
@@ -793,15 +793,26 @@ fn selection_highlights_text_inside_frame() {
     });
     let frame = ts.render();
 
-    let sel_rects: Vec<_> = frame
+    let sel_rects: Vec<[f32; 4]> = frame
         .decorations
         .iter()
         .filter(|d| d.kind == DecorationKind::Selection)
+        .map(|d| d.rect)
         .collect();
     assert!(
         !sel_rects.is_empty(),
         "selection inside a frame should produce selection rects"
     );
+    // The selection rect y should be below the top-level block
+    let block1_height = ts.block_visual_info(1).unwrap().height;
+    for r in &sel_rects {
+        assert!(
+            r[1] >= block1_height - 5.0,
+            "frame selection rect y ({}) should be below block 1 (height {})",
+            r[1],
+            block1_height
+        );
+    }
 }
 
 // ── Table hit-testing ──────────────────────────────────────────
@@ -928,32 +939,7 @@ fn caret_rect_inside_table_advances_with_position() {
 // ── Cursor movement across frame boundaries ────────────────────
 
 #[test]
-fn hit_test_below_frame_content_returns_block_after_frame() {
-    let mut ts = setup();
-    // "AB" at pos 0, frame with "CD" at pos 3, "EF" at pos 6
-    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
-    ts.add_frame(&FrameLayoutParams {
-        frame_id: 20,
-        position: FramePosition::Inline,
-        width: None,
-        height: None,
-        margin_top: 4.0,
-        margin_bottom: 4.0,
-        margin_left: 16.0,
-        margin_right: 0.0,
-        padding: 8.0,
-        border_width: 3.0,
-        border_style: FrameBorderStyle::LeftOnly,
-        blocks: vec![make_block_at(100, 3, "CD")],
-        tables: vec![],
-        frames: vec![],
-    });
-
-    // Get the frame's visual info to know where to add the block after
-    ts.render();
-
-    // Add a block after the frame. We need to reconstruct the layout
-    // since we can't add blocks after add_frame without clearing.
+fn hit_test_below_frame_content_does_not_stick_to_frame() {
     let mut ts = setup();
     ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
     ts.add_frame(&FrameLayoutParams {
@@ -973,21 +959,163 @@ fn hit_test_below_frame_content_returns_block_after_frame() {
         frames: vec![],
     });
 
-    // Simulate: caret is at end of frame content, user presses Down.
-    // Get the caret rect at position 5 (end of "CD" inside frame)
+    // Caret at end of "CD" inside frame (position 5)
     let caret = ts.caret_rect(5);
     let line_height = caret[3];
-    // Target y is one line below the caret
+    // Target y is one line below the caret (below the frame content)
     let target_y = caret[1] + line_height;
 
-    // hit_test at the target should NOT return the frame block (100).
-    // It should either return the block after the frame or BelowContent.
+    // hit_test below the frame content should NOT return the frame's block.
+    // It should fall through to the block before the frame or return BelowContent.
     let result = ts.hit_test(50.0, target_y);
-    if let Some(hit) = result {
+    if let Some(hit) = &result {
         assert_ne!(
             hit.block_id, 100,
-            "hit_test below frame content should not return the frame's block (got block_id=100)"
+            "hit_test below frame content should not return the frame's block"
         );
     }
-    // If None, that's also acceptable (no content below the frame)
+}
+
+// ── Hit-test inside frame content ──────────────────────────────
+
+#[test]
+fn hit_test_inside_frame_returns_frame_block() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::LeftOnly,
+        blocks: vec![make_block_at(100, 3, "Hello")],
+        tables: vec![],
+        frames: vec![],
+    });
+    ts.render();
+
+    // Get the frame content area: below block 1
+    let block1_info = ts.block_visual_info(1).unwrap();
+    let frame_content_y = block1_info.y + block1_info.height + 4.0 + 3.0 + 8.0 + 5.0;
+    // Hit inside the frame content
+    let result = ts.hit_test(50.0, frame_content_y);
+    assert!(result.is_some(), "hit test inside frame should return a result");
+    let hit = result.unwrap();
+    assert_eq!(
+        hit.block_id, 100,
+        "hit test inside frame should return the frame's block id"
+    );
+    assert!(
+        hit.position >= 3,
+        "position should be >= 3 (start of frame block text)"
+    );
+}
+
+#[test]
+fn hit_test_inside_frame_returns_text_region() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Hello world")],
+        tables: vec![],
+        frames: vec![],
+    });
+    ts.render();
+
+    let block1_info = ts.block_visual_info(1).unwrap();
+    let frame_content_y = block1_info.y + block1_info.height + 4.0 + 5.0;
+    let result = ts.hit_test(50.0, frame_content_y).unwrap();
+    assert!(
+        matches!(result.region, HitRegion::Text | HitRegion::PastLineEnd),
+        "hit test on frame text should return Text or PastLineEnd, got {:?}",
+        result.region
+    );
+}
+
+// ── Caret rect inside frames ───────────────────────────────────
+
+#[test]
+fn caret_rect_inside_frame_has_valid_position() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 4.0,
+        margin_bottom: 4.0,
+        margin_left: 16.0,
+        margin_right: 0.0,
+        padding: 8.0,
+        border_width: 3.0,
+        border_style: FrameBorderStyle::LeftOnly,
+        blocks: vec![make_block_at(100, 3, "Hello")],
+        tables: vec![],
+        frames: vec![],
+    });
+    ts.render();
+
+    // Caret at position 3 (start of "Hello" in frame)
+    let rect = ts.caret_rect(3);
+    let block1_info = ts.block_visual_info(1).unwrap();
+    let frame_top = block1_info.y + block1_info.height;
+
+    // Caret y should be in the frame area (below block 1)
+    assert!(
+        rect[1] >= frame_top - 5.0,
+        "caret rect y ({}) should be at or below the frame top ({})",
+        rect[1],
+        frame_top
+    );
+    assert!(rect[3] > 0.0, "caret height should be positive");
+}
+
+#[test]
+fn caret_rect_inside_frame_advances_with_position() {
+    let mut ts = setup();
+    ts.layout_blocks(vec![make_block_at(1, 0, "AB")]);
+    ts.add_frame(&FrameLayoutParams {
+        frame_id: 20,
+        position: FramePosition::Inline,
+        width: None,
+        height: None,
+        margin_top: 0.0,
+        margin_bottom: 0.0,
+        margin_left: 0.0,
+        margin_right: 0.0,
+        padding: 4.0,
+        border_width: 0.0,
+        border_style: FrameBorderStyle::None,
+        blocks: vec![make_block_at(100, 3, "Hello")],
+        tables: vec![],
+        frames: vec![],
+    });
+    ts.render();
+
+    let rect_start = ts.caret_rect(3); // start of "Hello"
+    let rect_mid = ts.caret_rect(5); // middle of "Hello"
+    assert!(
+        rect_mid[0] > rect_start[0],
+        "caret at position 5 ({}) should be right of position 3 ({})",
+        rect_mid[0],
+        rect_start[0]
+    );
 }
