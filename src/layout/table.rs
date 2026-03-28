@@ -159,17 +159,23 @@ fn compute_column_widths(
     content_area: f32,
     _padding: f32,
 ) -> Vec<f32> {
+    // When no explicit widths, distribute content_area evenly.
+    // Clamp to a reasonable range: at least 1px (zero-width guard) and
+    // at most a sensible default when the viewport is unbounded.
+    let default_col_width = if content_area.is_finite() {
+        (content_area / cols as f32).max(1.0)
+    } else {
+        200.0
+    };
+
     if specified.is_empty() || specified.len() != cols {
-        // Distribute evenly
-        let w = content_area / cols as f32;
-        return vec![w; cols];
+        return vec![default_col_width; cols];
     }
 
     // Use specified proportions
     let total: f32 = specified.iter().sum();
     if total <= 0.0 {
-        let w = content_area / cols as f32;
-        return vec![w; cols];
+        return vec![default_col_width; cols];
     }
 
     specified

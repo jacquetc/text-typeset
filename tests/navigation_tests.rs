@@ -607,6 +607,7 @@ fn phase_repeated_enter_in_frames(doc: &TextDocument, ts: &mut Typesetter) {
     for y_step in (0..(content_h as i32)).step_by(4) {
         if let Some(hit) = ts.hit_test(60.0, y_step as f32)
             && ts.block_visual_info(hit.block_id).is_none()
+            && !ts.is_block_in_table(hit.block_id)
             && !seen_blocks.contains(&hit.block_id)
         {
             seen_blocks.push(hit.block_id);
@@ -650,10 +651,35 @@ fn phase_repeated_enter_in_frames(doc: &TextDocument, ts: &mut Typesetter) {
             continue; // can't find frame end, skip
         }
 
+        // If end_pos lands on a block separator (one before the next block's
+        // start), insert_block there may escape the frame.  Step back one
+        // character to stay within the block text proper.
+        if let Ok(info) = doc.block_at(end_pos)
+            && end_pos < info.start
+        {
+            // Separator position - back up into actual block content
+            cursor.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
+            if !is_cursor_in_frame(ts, cursor.position()) {
+                continue;
+            }
+        }
+
         let label = format!("frame_block[{}]", fi);
 
         // Repeated Enter + char, 5 times
         for round in 0..5 {
+            // If the cursor is at a block separator (position before a block's
+            // start), step back so insert_block operates within the block text
+            // and stays inside the frame.
+            if let Ok(info) = doc.block_at(cursor.position())
+                && cursor.position() < info.start
+            {
+                cursor.move_position(MoveOperation::PreviousCharacter, MoveMode::MoveAnchor, 1);
+                if !is_cursor_in_frame(ts, cursor.position()) {
+                    break;
+                }
+            }
+
             cursor.insert_block().unwrap();
             relayout_after_edit(doc, ts);
 

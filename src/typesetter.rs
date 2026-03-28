@@ -627,6 +627,19 @@ impl Typesetter {
         })
     }
 
+    /// Check whether a block belongs to a table cell.
+    ///
+    /// Returns `true` if `block_id` is found in any table cell layout,
+    /// `false` if it is a top-level or frame block (or unknown).
+    pub fn is_block_in_table(&self, block_id: usize) -> bool {
+        self.flow_layout.tables.values().any(|table| {
+            table
+                .cell_layouts
+                .iter()
+                .any(|cell| cell.blocks.iter().any(|b| b.block_id == block_id))
+        })
+    }
+
     /// Scroll so that the given document position is visible, placing it
     /// roughly 1/3 from the top of the viewport.
     ///

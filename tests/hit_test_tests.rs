@@ -506,7 +506,10 @@ fn hit_test_above_all_content_returns_first_block() {
     // Simulate page-up from near the top: screen y is negative enough
     // that doc_y = y + scroll_offset < 0
     let result = ts.hit_test(10.0, -500.0);
-    assert!(result.is_some(), "above-content hit test should return a result");
+    assert!(
+        result.is_some(),
+        "above-content hit test should return a result"
+    );
     let hit = result.unwrap();
     assert_eq!(
         hit.block_id, 1,

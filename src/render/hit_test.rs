@@ -35,23 +35,8 @@ pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f3
         }
     }
 
-    // Search top-level blocks
-    for item in &flow.flow_order {
-        let bid = match item {
-            FlowItem::Block { block_id, .. } => *block_id,
-            _ => continue,
-        };
-        let block = match flow.blocks.get(&bid) {
-            Some(b) => b,
-            None => continue,
-        };
-
-        if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, 0.0, 0.0) {
-            return rect;
-        }
-    }
-
-    // Search table cell blocks
+    // Search table cell blocks (before top-level blocks, matching hit_test priority
+    // so that table cell positions are not stolen by an overlapping top-level block).
     for table in flow.tables.values() {
         for cell in &table.cell_layouts {
             if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
@@ -66,6 +51,22 @@ pub fn caret_rect(flow: &FlowLayout, scroll_offset: f32, position: usize) -> [f3
                     return rect;
                 }
             }
+        }
+    }
+
+    // Search top-level blocks
+    for item in &flow.flow_order {
+        let bid = match item {
+            FlowItem::Block { block_id, .. } => *block_id,
+            _ => continue,
+        };
+        let block = match flow.blocks.get(&bid) {
+            Some(b) => b,
+            None => continue,
+        };
+
+        if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, 0.0, 0.0) {
+            return rect;
         }
     }
 
@@ -361,11 +362,7 @@ fn caret_rect_in_frame(
 ) -> Option<[f32; 4]> {
     let fx = base_x + frame.x + frame.content_x;
     let fy = base_y + frame.y + frame.content_y;
-    for block in &frame.blocks {
-        if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, fx, fy) {
-            return Some(rect);
-        }
-    }
+    // Search tables before blocks (matching hit_test_in_frame priority).
     for table in &frame.tables {
         for cell in &table.cell_layouts {
             if cell.row >= table.row_ys.len() || cell.column >= table.column_xs.len() {
@@ -380,6 +377,11 @@ fn caret_rect_in_frame(
                     return Some(rect);
                 }
             }
+        }
+    }
+    for block in &frame.blocks {
+        if let Some(rect) = caret_rect_in_block(block, position, scroll_offset, fx, fy) {
+            return Some(rect);
         }
     }
     for nested in &frame.frames {
