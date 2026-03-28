@@ -368,3 +368,65 @@ fn relayout_table_block_updates_cell_content() {
         glyph_count_after
     );
 }
+
+#[test]
+fn render_block_only_preserves_table_cell_glyphs() {
+    let mut ts = setup_table(800.0);
+    let full_glyph_count = ts.render().glyphs.len();
+    assert!(full_glyph_count > 0, "table should render glyphs");
+
+    // Relayout cell (1,0) with new text, then use render_block_only
+    let updated = make_block_at(12, 18, "Updated!");
+    ts.relayout_block(&updated);
+    let frame = ts.render_block_only(12);
+
+    // render_block_only must fall back to a full render for table cell blocks,
+    // so glyphs should still be present (not vanish).
+    assert!(
+        frame.glyphs.len() > 10,
+        "table cell glyphs should be preserved after render_block_only, got {}",
+        frame.glyphs.len()
+    );
+}
+
+// ── Inter-row gap hit-test tests ────────────────────────────────
+
+#[test]
+fn hit_test_in_inter_row_gap_snaps_to_nearest_row() {
+    let ts = setup_table(800.0);
+
+    let r0 = Rect::from(ts.caret_rect(0)); // Row 0
+    let r1 = Rect::from(ts.caret_rect(18)); // Row 1
+
+    // Find the exact gap: just past row 0 bottom, just before row 1 top
+    let gap_y = (r0.bottom() + r1.y()) / 2.0;
+    let x = r0.x().max(1.0);
+
+    let hit = ts.hit_test(x, gap_y);
+    assert!(
+        hit.is_some(),
+        "hit_test in inter-row gap at y={} should snap to a row",
+        gap_y
+    );
+
+    // Should resolve to either row 0 or row 1 block
+    let bid = hit.unwrap().block_id;
+    assert!(
+        bid == 10 || bid == 12,
+        "should hit row 0 (block 10) or row 1 (block 12), got block {}",
+        bid
+    );
+}
+
+#[test]
+fn hit_test_just_above_row_content_finds_row() {
+    let ts = setup_table(800.0);
+
+    // Hit just 1px above the row 1 caret
+    let r1 = Rect::from(ts.caret_rect(18));
+    let hit = ts.hit_test(r1.x().max(1.0), r1.y() - 1.0);
+    assert!(
+        hit.is_some(),
+        "hit_test just above row 1 content should still find a cell"
+    );
+}

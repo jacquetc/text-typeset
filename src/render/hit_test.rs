@@ -327,7 +327,15 @@ fn hit_test_table_content(
 }
 
 /// Find which row a local y coordinate falls into.
+///
+/// If the coordinate lands in the gap between two rows (border/spacing area),
+/// snaps to the nearest row so that vertical navigation (down-arrow) can
+/// cross row boundaries without falling into a dead zone.
 fn find_table_row(table: &crate::layout::table::TableLayout, local_y: f32) -> Option<usize> {
+    if table.row_ys.is_empty() {
+        return None;
+    }
+
     for (r, &row_y) in table.row_ys.iter().enumerate() {
         let row_top = row_y - table.cell_padding;
         let row_bottom =
@@ -336,11 +344,34 @@ fn find_table_row(table: &crate::layout::table::TableLayout, local_y: f32) -> Op
             return Some(r);
         }
     }
-    None
+
+    // Point is inside the table but in the gap between rows (or just outside
+    // the first/last row padding). Snap to the nearest row.
+    let mut best_row = 0;
+    let mut best_dist = f32::MAX;
+    for (r, &row_y) in table.row_ys.iter().enumerate() {
+        let row_top = row_y - table.cell_padding;
+        let row_bottom =
+            row_y + table.row_heights.get(r).copied().unwrap_or(0.0) + table.cell_padding;
+        let row_mid = (row_top + row_bottom) / 2.0;
+        let dist = (local_y - row_mid).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_row = r;
+        }
+    }
+    Some(best_row)
 }
 
 /// Find which column a local x coordinate falls into.
+///
+/// If the coordinate lands in the gap between columns, snaps to the nearest
+/// column (same rationale as `find_table_row`).
 fn find_table_column(table: &crate::layout::table::TableLayout, local_x: f32) -> Option<usize> {
+    if table.column_xs.is_empty() {
+        return None;
+    }
+
     for (c, &col_x) in table.column_xs.iter().enumerate() {
         let col_left = col_x - table.cell_padding;
         let col_right =
@@ -349,7 +380,22 @@ fn find_table_column(table: &crate::layout::table::TableLayout, local_x: f32) ->
             return Some(c);
         }
     }
-    None
+
+    // Snap to nearest column.
+    let mut best_col = 0;
+    let mut best_dist = f32::MAX;
+    for (c, &col_x) in table.column_xs.iter().enumerate() {
+        let col_left = col_x - table.cell_padding;
+        let col_right =
+            col_x + table.column_content_widths.get(c).copied().unwrap_or(0.0) + table.cell_padding;
+        let col_mid = (col_left + col_right) / 2.0;
+        let dist = (local_x - col_mid).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_col = c;
+        }
+    }
+    Some(best_col)
 }
 
 /// Search a frame (and its nested frames, recursively) for a caret position.

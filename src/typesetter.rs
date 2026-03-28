@@ -353,11 +353,20 @@ impl Typesetter {
             return self.render();
         }
 
-        // Frame blocks are cached per-frame (keyed by frame_id) and their
-        // internal decorations aren't stored in block_decorations. Fall back
-        // to a full render which correctly handles frame content, height
-        // changes, and decoration regeneration.
+        // Table cell blocks are cached per-table (keyed by table_id), and
+        // frame blocks are cached per-frame (keyed by frame_id). Neither has
+        // entries in block_decorations or block_glyphs keyed by the cell
+        // block_id, so incremental rendering cannot update them in place.
+        // Fall back to a full render for both cases.
         if !self.flow_layout.blocks.contains_key(&block_id) {
+            let in_table = self
+                .flow_layout
+                .tables
+                .values()
+                .any(|table| table.cell_layouts.iter().any(|c| c.blocks.iter().any(|b| b.block_id == block_id)));
+            if in_table {
+                return self.render();
+            }
             let in_frame = self
                 .flow_layout
                 .frames
