@@ -54,6 +54,7 @@ pub struct Typesetter {
     content_width_mode: ContentWidthMode,
     selection_color: [f32; 4],
     cursor_color: [f32; 4],
+    text_color: [f32; 4],
     cursors: Vec<CursorDisplay>,
 }
 
@@ -77,6 +78,7 @@ impl Typesetter {
             content_width_mode: ContentWidthMode::Auto,
             selection_color: [0.26, 0.52, 0.96, 0.3],
             cursor_color: [0.0, 0.0, 0.0, 1.0],
+            text_color: [0.0, 0.0, 0.0, 1.0],
             cursors: Vec::new(),
         }
     }
@@ -592,6 +594,7 @@ impl Typesetter {
             position: cursor.position,
             anchor: cursor.anchor,
             visible: cursor.visible,
+            selected_cells: cursor.selected_cells.clone(),
         }];
     }
 
@@ -605,6 +608,7 @@ impl Typesetter {
                 position: c.position,
                 anchor: c.anchor,
                 visible: c.visible,
+                selected_cells: c.selected_cells.clone(),
             })
             .collect();
     }
@@ -621,6 +625,16 @@ impl Typesetter {
     /// Default: `[0.0, 0.0, 0.0, 1.0]` (black).
     pub fn set_cursor_color(&mut self, color: [f32; 4]) {
         self.cursor_color = color;
+    }
+
+    /// Set the default text color (`[r, g, b, a]`, 0.0-1.0).
+    ///
+    /// This color is used for glyphs and decorations (underline, strikeout, overline)
+    /// when no per-fragment `foreground_color` is set.
+    ///
+    /// Default: `[0.0, 0.0, 0.0, 1.0]` (black).
+    pub fn set_text_color(&mut self, color: [f32; 4]) {
+        self.text_color = color;
     }
 
     // ── Scrolling ───────────────────────────────────────────────

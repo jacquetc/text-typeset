@@ -14,8 +14,17 @@ pub fn generate_cursor_decorations(
     let mut decorations = Vec::new();
 
     for cursor in cursors {
-        // Selection highlight (if anchor != position)
-        if cursor.anchor != cursor.position {
+        if !cursor.selected_cells.is_empty() {
+            // Cell-level selection: highlight entire cells instead of text ranges.
+            compute_cell_selection_rects(
+                flow,
+                scroll_offset,
+                &cursor.selected_cells,
+                selection_color,
+                &mut decorations,
+            );
+        } else if cursor.anchor != cursor.position {
+            // Text-level selection highlight
             let sel_start = cursor.anchor.min(cursor.position);
             let sel_end = cursor.anchor.max(cursor.position);
             let sel_rects =
@@ -259,6 +268,33 @@ fn selection_rects_for_block(
                 rect: [x_start, line_top, x_end - x_start, line_height],
                 color,
                 kind: DecorationKind::Selection,
+            });
+        }
+    }
+}
+
+/// Emit cell-level selection rectangles for each `(table_id, row, col)`.
+fn compute_cell_selection_rects(
+    flow: &FlowLayout,
+    scroll_offset: f32,
+    selected_cells: &[(usize, usize, usize)],
+    color: [f32; 4],
+    rects: &mut Vec<DecorationRect>,
+) {
+    for &(table_id, row, col) in selected_cells {
+        if let Some(table) = flow.tables.get(&table_id) {
+            if row >= table.row_ys.len() || col >= table.column_xs.len() {
+                continue;
+            }
+            let cx = table.column_xs[col] - table.cell_padding;
+            let cy = table.row_ys[row] - table.cell_padding;
+            let cw = table.column_content_widths[col] + table.cell_padding * 2.0;
+            let ch = table.row_heights[row] + table.cell_padding * 2.0;
+            let screen_y = table.y + cy - scroll_offset;
+            rects.push(DecorationRect {
+                rect: [cx, screen_y, cw, ch],
+                color,
+                kind: DecorationKind::CellSelection,
             });
         }
     }

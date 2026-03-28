@@ -109,6 +109,9 @@ pub enum DecorationKind {
     /// Text-level background highlight (behind individual text runs).
     /// Adapters should draw these before glyph quads so text appears on top.
     TextBackground,
+    /// Cell-level selection highlight (entire cell background when cells are
+    /// selected as a rectangular region, as opposed to text within cells).
+    CellSelection,
 }
 
 /// Underline style for text decorations.
@@ -201,6 +204,10 @@ pub struct CursorDisplay {
     /// Whether the caret is visible (false during the blink-off phase).
     /// The adapter manages the blink timer; text-typeset just respects this flag.
     pub visible: bool,
+    /// When non-empty, render cell-level selection highlights instead of
+    /// text-level selection. Each tuple is `(table_id, row, col)` identifying
+    /// a selected cell. The adapter fills this from `TextCursor::selected_cells()`.
+    pub selected_cells: Vec<(usize, usize, usize)>,
 }
 
 // ── Scrolling ───────────────────────────────────────────────────
