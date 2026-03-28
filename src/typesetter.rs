@@ -359,11 +359,12 @@ impl Typesetter {
         // block_id, so incremental rendering cannot update them in place.
         // Fall back to a full render for both cases.
         if !self.flow_layout.blocks.contains_key(&block_id) {
-            let in_table = self
-                .flow_layout
-                .tables
-                .values()
-                .any(|table| table.cell_layouts.iter().any(|c| c.blocks.iter().any(|b| b.block_id == block_id)));
+            let in_table = self.flow_layout.tables.values().any(|table| {
+                table
+                    .cell_layouts
+                    .iter()
+                    .any(|c| c.blocks.iter().any(|b| b.block_id == block_id))
+            });
             if in_table {
                 return self.render();
             }
