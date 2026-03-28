@@ -21,6 +21,7 @@ pub fn build_render_frame(
     cache: &mut GlyphCache,
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
+    viewport_width: f32,
     viewport_height: f32,
     cursors: &[CursorDisplay],
     cursor_color: [f32; 4],
@@ -156,7 +157,7 @@ pub fn build_render_frame(
                 viewport_height,
                 0.0,
                 0.0,
-                flow.viewport_width,
+                viewport_width,
                 text_color,
             );
             render_frame
@@ -170,8 +171,15 @@ pub fn build_render_frame(
     }
 
     // Generate cursor and selection decorations
-    let cursor_decos =
-        generate_cursor_decorations(flow, cursors, scroll_offset, cursor_color, selection_color);
+    let cursor_decos = generate_cursor_decorations(
+        flow,
+        cursors,
+        scroll_offset,
+        cursor_color,
+        selection_color,
+        viewport_width,
+        viewport_height,
+    );
     render_frame.decorations.extend(cursor_decos);
 
     // Update atlas metadata in the render frame

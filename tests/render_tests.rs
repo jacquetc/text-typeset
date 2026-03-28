@@ -2341,3 +2341,210 @@ fn mixed_text_and_image_both_render() {
     );
     assert_eq!(frame.images[0].name, "icon.png");
 }
+
+// ── Zoom tests ─────────────────────────────────────────────────
+
+#[test]
+fn zoom_2x_scales_glyph_coordinates() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Hello")]);
+
+    // Render at 1x
+    let frame_1x = ts.render();
+    let glyphs_1x: Vec<[f32; 4]> = frame_1x.glyphs.iter().map(|q| q.screen).collect();
+    assert!(!glyphs_1x.is_empty());
+
+    // Render at 2x
+    ts.set_zoom(2.0);
+    let frame_2x = ts.render();
+    let glyphs_2x: Vec<[f32; 4]> = frame_2x.glyphs.iter().map(|q| q.screen).collect();
+
+    assert_eq!(glyphs_1x.len(), glyphs_2x.len());
+    for (g1, g2) in glyphs_1x.iter().zip(glyphs_2x.iter()) {
+        assert!((g2[0] - g1[0] * 2.0).abs() < 0.01, "x: {} vs {}", g2[0], g1[0] * 2.0);
+        assert!((g2[1] - g1[1] * 2.0).abs() < 0.01, "y: {} vs {}", g2[1], g1[1] * 2.0);
+        assert!((g2[2] - g1[2] * 2.0).abs() < 0.01, "w: {} vs {}", g2[2], g1[2] * 2.0);
+        assert!((g2[3] - g1[3] * 2.0).abs() < 0.01, "h: {} vs {}", g2[3], g1[3] * 2.0);
+    }
+}
+
+#[test]
+fn zoom_half_scales_glyph_coordinates() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Test")]);
+
+    let frame_1x = ts.render();
+    let glyphs_1x: Vec<[f32; 4]> = frame_1x.glyphs.iter().map(|q| q.screen).collect();
+
+    ts.set_zoom(0.5);
+    let frame_half = ts.render();
+    let glyphs_half: Vec<[f32; 4]> = frame_half.glyphs.iter().map(|q| q.screen).collect();
+
+    assert_eq!(glyphs_1x.len(), glyphs_half.len());
+    for (g1, gh) in glyphs_1x.iter().zip(glyphs_half.iter()) {
+        assert!((gh[0] - g1[0] * 0.5).abs() < 0.01);
+        assert!((gh[1] - g1[1] * 0.5).abs() < 0.01);
+        assert!((gh[2] - g1[2] * 0.5).abs() < 0.01);
+        assert!((gh[3] - g1[3] * 0.5).abs() < 0.01);
+    }
+}
+
+#[test]
+fn zoom_does_not_change_content_height() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Hello world")]);
+    let h1 = ts.content_height();
+
+    ts.set_zoom(3.0);
+    let h2 = ts.content_height();
+
+    assert!((h1 - h2).abs() < 0.001, "content_height should not change with zoom");
+}
+
+#[test]
+fn zoom_hit_test_inverse_scaling() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Hello world")]);
+    ts.render();
+
+    // Hit test at 1x
+    let result_1x = ts.hit_test(50.0, 10.0);
+
+    // Same logical position at 2x requires doubled screen coordinates
+    ts.set_zoom(2.0);
+    let result_2x = ts.hit_test(100.0, 20.0);
+
+    assert!(result_1x.is_some());
+    assert!(result_2x.is_some());
+    assert_eq!(
+        result_1x.unwrap().position,
+        result_2x.unwrap().position,
+        "hit_test at (100,20) with zoom 2x should match (50,10) at 1x"
+    );
+}
+
+#[test]
+fn zoom_caret_rect_scales_output() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Hello")]);
+    ts.render();
+
+    let rect_1x = ts.caret_rect(0);
+
+    ts.set_zoom(2.0);
+    let rect_2x = ts.caret_rect(0);
+
+    assert!((rect_2x[0] - rect_1x[0] * 2.0).abs() < 0.01);
+    assert!((rect_2x[1] - rect_1x[1] * 2.0).abs() < 0.01);
+    assert!((rect_2x[2] - rect_1x[2] * 2.0).abs() < 0.01);
+    assert!((rect_2x[3] - rect_1x[3] * 2.0).abs() < 0.01);
+}
+
+#[test]
+fn zoom_decorations_scale() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![{
+        let mut b = make_block(1, "underlined");
+        b.fragments[0].underline_style = UnderlineStyle::Single;
+        b
+    }]);
+
+    let frame_1x = ts.render();
+    let underlines_1x: Vec<[f32; 4]> = frame_1x
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Underline)
+        .map(|d| d.rect)
+        .collect();
+    assert!(!underlines_1x.is_empty());
+
+    ts.set_zoom(2.0);
+    let frame_2x = ts.render();
+    let underlines_2x: Vec<[f32; 4]> = frame_2x
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Underline)
+        .map(|d| d.rect)
+        .collect();
+
+    assert_eq!(underlines_1x.len(), underlines_2x.len());
+    for (u1, u2) in underlines_1x.iter().zip(underlines_2x.iter()) {
+        assert!((u2[0] - u1[0] * 2.0).abs() < 0.5, "x: {} vs {}", u2[0], u1[0] * 2.0);
+        assert!((u2[1] - u1[1] * 2.0).abs() < 0.5, "y: {} vs {}", u2[1], u1[1] * 2.0);
+    }
+}
+
+#[test]
+fn zoom_clamps_to_valid_range() {
+    let mut ts = Typesetter::new();
+    ts.set_zoom(0.01);
+    assert!((ts.zoom() - 0.1).abs() < f32::EPSILON);
+    ts.set_zoom(100.0);
+    assert!((ts.zoom() - 10.0).abs() < f32::EPSILON);
+    ts.set_zoom(1.5);
+    assert!((ts.zoom() - 1.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn zoom_default_is_one() {
+    let ts = Typesetter::new();
+    assert!((ts.zoom() - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn zoom_render_cursor_only_scales_cursor() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Hello")]);
+    ts.set_zoom(2.0);
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: 2,
+        anchor: 2,
+        visible: true,
+        selected_cells: vec![],
+    });
+    ts.render();
+
+    // Move cursor, use render_cursor_only
+    ts.set_cursor(&text_typeset::CursorDisplay {
+        position: 3,
+        anchor: 3,
+        visible: true,
+        selected_cells: vec![],
+    });
+    let frame = ts.render_cursor_only();
+
+    let cursor_rects: Vec<&[f32; 4]> = frame
+        .decorations
+        .iter()
+        .filter(|d| d.kind == DecorationKind::Cursor)
+        .map(|d| &d.rect)
+        .collect();
+    assert_eq!(cursor_rects.len(), 1);
+    // Cursor should have non-trivial zoomed coordinates
+    let r = cursor_rects[0];
+    assert!(r[2] > 0.0 && r[3] > 0.0, "cursor should have positive size");
+}
+
+#[test]
+fn zoom_render_block_only_scales_output() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![
+        make_block(1, "First"),
+        make_block(2, "Second"),
+    ]);
+    ts.set_zoom(2.0);
+    ts.render();
+
+    // Relayout block 1 and use render_block_only
+    ts.relayout_block(&make_block(1, "Changed"));
+    let frame = ts.render_block_only(1);
+
+    // All glyphs should be at zoomed coordinates
+    for q in &frame.glyphs {
+        assert!(
+            q.screen[2] > 0.0 && q.screen[3] > 0.0,
+            "glyph should have positive size at zoom"
+        );
+    }
+    assert_no_glyph_overlap(frame);
+}

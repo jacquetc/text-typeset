@@ -56,6 +56,8 @@ pub struct Typesetter {
     cursor_color: [f32; 4],
     text_color: [f32; 4],
     cursors: Vec<CursorDisplay>,
+    zoom: f32,
+    rendered_zoom: f32,
 }
 
 impl Typesetter {
@@ -80,6 +82,8 @@ impl Typesetter {
             cursor_color: [0.0, 0.0, 0.0, 1.0],
             text_color: [0.0, 0.0, 0.0, 1.0],
             cursors: Vec::new(),
+            zoom: 1.0,
+            rendered_zoom: f32::NAN,
         }
     }
 
@@ -187,11 +191,12 @@ impl Typesetter {
 
     /// The effective width used for text layout (line wrapping, table columns, etc.).
     ///
-    /// In [`ContentWidthMode::Auto`], equals viewport width.
-    /// In [`ContentWidthMode::Fixed`], equals the set value.
+    /// In [`ContentWidthMode::Auto`], equals `viewport_width / zoom` so that
+    /// text reflows to fit the zoomed viewport.
+    /// In [`ContentWidthMode::Fixed`], equals the set value (zoom only magnifies).
     pub fn layout_width(&self) -> f32 {
         match self.content_width_mode {
-            ContentWidthMode::Auto => self.viewport_width,
+            ContentWidthMode::Auto => self.viewport_width / self.zoom,
             ContentWidthMode::Fixed(w) => w,
         }
     }
@@ -217,6 +222,28 @@ impl Typesetter {
     /// Returns 0.0 if no blocks have been laid out.
     pub fn max_content_width(&self) -> f32 {
         self.flow_layout.cached_max_content_width
+    }
+
+    // -- Zoom ────────────────────────────────────────────────────
+
+    /// Set the display zoom level.
+    ///
+    /// Zoom is a pure display transform: layout stays at base size, and all
+    /// screen-space output (glyph quads, decorations, caret rects) is scaled
+    /// by the zoom factor. Hit-test input coordinates are inversely scaled.
+    ///
+    /// This is PDF-viewer-style zoom (no text reflow). For browser-style
+    /// zoom that reflows text, combine with
+    /// `set_content_width(viewport_width / zoom)`.
+    ///
+    /// Clamped to `0.1..=10.0`. Default is `1.0`.
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom.clamp(0.1, 10.0);
+    }
+
+    /// The current display zoom level (default 1.0).
+    pub fn zoom(&self) -> f32 {
+        self.zoom
     }
 
     // ── Layout ──────────────────────────────────────────────────
@@ -323,6 +350,8 @@ impl Typesetter {
     /// On each call, stale glyphs (unused for ~120 frames) are evicted from the
     /// atlas to reclaim space.
     pub fn render(&mut self) -> &RenderFrame {
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
         crate::render::frame::build_render_frame(
             &self.flow_layout,
             &self.font_registry,
@@ -330,7 +359,8 @@ impl Typesetter {
             &mut self.glyph_cache,
             &mut self.scale_context,
             self.scroll_offset,
-            self.viewport_height,
+            effective_vw,
+            effective_vh,
             &self.cursors,
             self.cursor_color,
             self.selection_color,
@@ -338,6 +368,8 @@ impl Typesetter {
             &mut self.render_frame,
         );
         self.rendered_scroll_offset = self.scroll_offset;
+        self.rendered_zoom = self.zoom;
+        apply_zoom(&mut self.render_frame, self.zoom);
         &self.render_frame
     }
 
@@ -351,8 +383,10 @@ impl Typesetter {
     /// this falls back to a full `render()` since cached glyph positions
     /// for other blocks would be stale.
     pub fn render_block_only(&mut self, block_id: usize) -> &RenderFrame {
-        // If scroll offset changed, all cached glyph positions are stale.
-        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001 {
+        // If scroll offset or zoom changed, all cached glyph positions are stale.
+        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001
+            || (self.zoom - self.rendered_zoom).abs() > 0.001
+        {
             return self.render();
         }
 
@@ -396,6 +430,8 @@ impl Typesetter {
         }
 
         // Re-render just this block's glyphs into a temporary frame
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
         let mut new_glyphs = Vec::new();
         let mut new_images = Vec::new();
         if let Some(block) = self.flow_layout.blocks.get(&block_id) {
@@ -409,7 +445,7 @@ impl Typesetter {
                 &mut self.glyph_cache,
                 &mut self.scale_context,
                 self.scroll_offset,
-                self.viewport_height,
+                effective_vh,
                 self.text_color,
                 &mut tmp,
             );
@@ -423,10 +459,10 @@ impl Typesetter {
                 block,
                 &self.font_registry,
                 self.scroll_offset,
-                self.viewport_height,
+                effective_vh,
                 0.0,
                 0.0,
-                self.flow_layout.viewport_width,
+                effective_vw,
                 self.text_color,
             )
         } else {
@@ -461,6 +497,7 @@ impl Typesetter {
 
         // Rebuild flat vecs from per-block cache + cursor decorations
         self.rebuild_flat_frame();
+        apply_zoom(&mut self.render_frame, self.zoom);
 
         &self.render_frame
     }
@@ -473,8 +510,10 @@ impl Typesetter {
     /// If the scroll offset changed since the last full render, falls back to
     /// a full [`render`](Self::render) so that glyph positions are updated.
     pub fn render_cursor_only(&mut self) -> &RenderFrame {
-        // If scroll offset changed, glyph quads are stale - need full re-render
-        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001 {
+        // If scroll offset or zoom changed, glyph quads are stale - need full re-render
+        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001
+            || (self.zoom - self.rendered_zoom).abs() > 0.001
+        {
             return self.render();
         }
 
@@ -482,18 +521,25 @@ impl Typesetter {
         self.render_frame.decorations.retain(|d| {
             !matches!(
                 d.kind,
-                crate::types::DecorationKind::Cursor | crate::types::DecorationKind::Selection
+                crate::types::DecorationKind::Cursor
+                    | crate::types::DecorationKind::Selection
+                    | crate::types::DecorationKind::CellSelection
             )
         });
 
-        // Regenerate cursor/selection decorations
-        let cursor_decos = crate::render::cursor::generate_cursor_decorations(
+        // Regenerate cursor/selection decorations at 1x, then zoom
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
+        let mut cursor_decos = crate::render::cursor::generate_cursor_decorations(
             &self.flow_layout,
             &self.cursors,
             self.scroll_offset,
             self.cursor_color,
             self.selection_color,
+            effective_vw,
+            effective_vh,
         );
+        apply_zoom_decorations(&mut cursor_decos, self.zoom);
         self.render_frame.decorations.extend(cursor_decos);
 
         &self.render_frame
@@ -540,12 +586,16 @@ impl Typesetter {
             }
         }
 
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
         let cursor_decos = crate::render::cursor::generate_cursor_decorations(
             &self.flow_layout,
             &self.cursors,
             self.scroll_offset,
             self.cursor_color,
             self.selection_color,
+            effective_vw,
+            effective_vh,
         );
         self.render_frame.decorations.extend(cursor_decos);
 
@@ -571,7 +621,12 @@ impl Typesetter {
     /// The scroll offset is accounted for internally.
     /// Returns `None` if the flow has no content.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<HitTestResult> {
-        crate::render::hit_test::hit_test(&self.flow_layout, self.scroll_offset, x, y)
+        crate::render::hit_test::hit_test(
+            &self.flow_layout,
+            self.scroll_offset,
+            x / self.zoom,
+            y / self.zoom,
+        )
     }
 
     /// Get the screen-space caret rectangle at a document position.
@@ -581,7 +636,13 @@ impl Typesetter {
     /// placement. For drawing the caret, use the [`crate::DecorationKind::Cursor`]
     /// entry in [`crate::RenderFrame::decorations`] instead.
     pub fn caret_rect(&self, position: usize) -> [f32; 4] {
-        crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position)
+        let mut rect =
+            crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position);
+        rect[0] *= self.zoom;
+        rect[1] *= self.zoom;
+        rect[2] *= self.zoom;
+        rect[3] *= self.zoom;
+        rect
     }
 
     // ── Cursor display ──────────────────────────────────────────
@@ -672,8 +733,9 @@ impl Typesetter {
     ///
     /// Returns the new scroll offset.
     pub fn scroll_to_position(&mut self, position: usize) -> f32 {
-        let rect = self.caret_rect(position);
-        let target_y = rect[1] + self.scroll_offset - self.viewport_height / 3.0;
+        let rect =
+            crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position);
+        let target_y = rect[1] + self.scroll_offset - self.viewport_height / (3.0 * self.zoom);
         self.scroll_offset = target_y.max(0.0);
         self.scroll_offset
     }
@@ -688,17 +750,20 @@ impl Typesetter {
             return None;
         }
         let pos = self.cursors[0].position;
-        let rect = self.caret_rect(pos);
+        // Work in 1x (document) coordinates so scroll_offset stays in document space
+        let rect =
+            crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, pos);
         let caret_screen_y = rect[1];
         let caret_screen_bottom = caret_screen_y + rect[3];
-        let margin = 10.0;
+        let effective_vh = self.viewport_height / self.zoom;
+        let margin = 10.0 / self.zoom;
         let old_offset = self.scroll_offset;
 
         if caret_screen_y < 0.0 {
             self.scroll_offset += caret_screen_y - margin;
             self.scroll_offset = self.scroll_offset.max(0.0);
-        } else if caret_screen_bottom > self.viewport_height {
-            self.scroll_offset += caret_screen_bottom - self.viewport_height + margin;
+        } else if caret_screen_bottom > effective_vh {
+            self.scroll_offset += caret_screen_bottom - effective_vh + margin;
         }
 
         if (self.scroll_offset - old_offset).abs() > 0.001 {
@@ -714,6 +779,39 @@ enum FlowItemKind {
     Block(crate::layout::block::BlockLayoutParams),
     Table(crate::layout::table::TableLayoutParams),
     Frame(crate::layout::frame::FrameLayoutParams),
+}
+
+/// Scale all screen-space coordinates in a RenderFrame by the zoom factor.
+fn apply_zoom(frame: &mut RenderFrame, zoom: f32) {
+    if (zoom - 1.0).abs() <= f32::EPSILON {
+        return;
+    }
+    for q in &mut frame.glyphs {
+        q.screen[0] *= zoom;
+        q.screen[1] *= zoom;
+        q.screen[2] *= zoom;
+        q.screen[3] *= zoom;
+    }
+    for q in &mut frame.images {
+        q.screen[0] *= zoom;
+        q.screen[1] *= zoom;
+        q.screen[2] *= zoom;
+        q.screen[3] *= zoom;
+    }
+    apply_zoom_decorations(&mut frame.decorations, zoom);
+}
+
+/// Scale all screen-space coordinates in decoration rects by the zoom factor.
+fn apply_zoom_decorations(decorations: &mut [crate::types::DecorationRect], zoom: f32) {
+    if (zoom - 1.0).abs() <= f32::EPSILON {
+        return;
+    }
+    for d in decorations.iter_mut() {
+        d.rect[0] *= zoom;
+        d.rect[1] *= zoom;
+        d.rect[2] *= zoom;
+        d.rect[3] *= zoom;
+    }
 }
 
 impl Default for Typesetter {

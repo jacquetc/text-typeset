@@ -4,12 +4,17 @@ use crate::render::hit_test::caret_rect;
 use crate::types::{CursorDisplay, DecorationKind, DecorationRect};
 
 /// Generate cursor and selection decoration rects from the current cursor state.
+///
+/// `viewport_width` and `viewport_height` control selection highlight extent and
+/// viewport culling. Pass effective (zoom-adjusted) values when zoom != 1.0.
 pub fn generate_cursor_decorations(
     flow: &FlowLayout,
     cursors: &[CursorDisplay],
     scroll_offset: f32,
     cursor_color: [f32; 4],
     selection_color: [f32; 4],
+    viewport_width: f32,
+    viewport_height: f32,
 ) -> Vec<DecorationRect> {
     let mut decorations = Vec::new();
 
@@ -27,8 +32,15 @@ pub fn generate_cursor_decorations(
             // Text-level selection highlight
             let sel_start = cursor.anchor.min(cursor.position);
             let sel_end = cursor.anchor.max(cursor.position);
-            let sel_rects =
-                compute_selection_rects(flow, scroll_offset, sel_start, sel_end, selection_color);
+            let sel_rects = compute_selection_rects(
+                flow,
+                scroll_offset,
+                sel_start,
+                sel_end,
+                selection_color,
+                viewport_width,
+                viewport_height,
+            );
             decorations.extend(sel_rects);
         }
 
@@ -59,11 +71,12 @@ fn compute_selection_rects(
     start: usize,
     end: usize,
     color: [f32; 4],
+    viewport_width: f32,
+    viewport_height: f32,
 ) -> Vec<DecorationRect> {
     let mut rects = Vec::new();
-    let viewport_width = flow.viewport_width;
     let view_top = scroll_offset;
-    let view_bottom = scroll_offset + flow.viewport_height;
+    let view_bottom = scroll_offset + viewport_height;
 
     // Process frames first (matching hit_test / caret_rect priority so that
     // after incremental relayout of a frame block, overlapping stale positions
