@@ -76,7 +76,7 @@ jobs:
     name: Create Release
     needs: publish
     # Run even if publish was skipped (pre-release) but not if it failed
-    if: ${{ always() && needs.build.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
+    if: ${{ always() && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
