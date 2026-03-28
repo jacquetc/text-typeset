@@ -68,11 +68,6 @@ pub fn break_into_lines(
         let glyph_advance = flat[i].x_advance;
         line_width += glyph_advance;
 
-        // Check if this glyph index is a break point
-        if break_points.contains(&(i + 1)) {
-            last_break_glyph = Some(i + 1);
-        }
-
         // Check for mandatory break — O(1) HashSet lookup
         let is_mandatory = mandatory_breaks.contains(&(i + 1));
 
@@ -118,6 +113,14 @@ pub fn break_into_lines(
                 }
             }
             last_break_glyph = None;
+        }
+
+        // Update break point AFTER the width check so that a break opportunity
+        // discovered at this glyph does not clobber the previous one when the
+        // width is already exceeded. This prevents the end-of-text mandatory
+        // break from keeping the last glyph on an overflowing line.
+        if break_points.contains(&(i + 1)) {
+            last_break_glyph = Some(i + 1);
         }
     }
 

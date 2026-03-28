@@ -378,7 +378,7 @@ impl FlowLayout {
             // Infer spacing from existing layout
             if table.row_ys.len() >= 2 && !table.row_heights.is_empty() {
                 let expected = table.row_ys[0] + padding + table.row_heights[0] + padding;
-                (table.row_ys.get(1).copied().unwrap_or(expected) - expected + padding).max(0.0)
+                (table.row_ys.get(1).copied().unwrap_or(expected) - expected).max(0.0)
             } else {
                 0.0
             }

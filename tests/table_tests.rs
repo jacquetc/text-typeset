@@ -3,10 +3,13 @@
 //! Uses the framework-agnostic API (no text-document dependency).
 
 mod helpers;
-use helpers::{NOTO_SANS, Rect, assert_caret_is_real, make_block_at, make_cell_at, make_table};
+use helpers::{
+    NOTO_SANS, Rect, RenderFrameExt, assert_caret_is_real, assert_no_glyph_overlap, make_block_at,
+    make_cell_at, make_table,
+};
 
-use text_typeset::Typesetter;
-use text_typeset::layout::table::TableLayoutParams;
+use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
+use text_typeset::{CursorDisplay, DecorationKind, Typesetter};
 
 // ── Setup helpers ────────────────────────────────────────────────
 
@@ -428,5 +431,655 @@ fn hit_test_just_above_row_content_finds_row() {
     assert!(
         hit.is_some(),
         "hit_test just above row 1 content should still find a cell"
+    );
+}
+
+// ── Layout: column widths, spacing, single row/col, multi-block ─
+
+#[test]
+fn table_custom_column_widths_respected() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    // 1:3 ratio -- col 1 should be 3x wider than col 0
+    let table = TableLayoutParams {
+        table_id: 1,
+        rows: 1,
+        columns: 2,
+        column_widths: vec![1.0, 3.0],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![
+            make_cell_at(0, 0, 10, 0, "Narrow"),
+            make_cell_at(0, 1, 11, 7, "Wide column"),
+        ],
+    };
+    ts.add_table(&table);
+    ts.render();
+
+    let x0 = ts.caret_rect(0)[0];
+    let x1 = ts.caret_rect(7)[0];
+
+    // Col 1 should start significantly to the right of col 0
+    assert!(
+        x1 > x0,
+        "col 1 x ({}) should be right of col 0 x ({})",
+        x1,
+        x0
+    );
+
+    // Verify the proportions: col 0 gets 1/4, col 1 gets 3/4 of content area.
+    // Compare against an even-distribution table.
+    let mut ts_even = Typesetter::new();
+    let face_e = ts_even.register_font(NOTO_SANS);
+    ts_even.set_default_font(face_e, 16.0);
+    ts_even.set_viewport(800.0, 600.0);
+    let table_even = TableLayoutParams {
+        table_id: 1,
+        rows: 1,
+        columns: 2,
+        column_widths: vec![], // even distribution
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![
+            make_cell_at(0, 0, 10, 0, "Narrow"),
+            make_cell_at(0, 1, 11, 7, "Wide column"),
+        ],
+    };
+    ts_even.add_table(&table_even);
+    ts_even.render();
+
+    let x1_even = ts_even.caret_rect(7)[0];
+    // In the 1:3 table, col 1 starts earlier (col 0 is narrower)
+    assert!(
+        x1 < x1_even,
+        "with 1:3 widths, col 1 should start earlier ({}) than even ({})",
+        x1,
+        x1_even
+    );
+}
+
+#[test]
+fn table_cell_spacing_creates_gaps_between_rows() {
+    // Table without spacing
+    let mut ts0 = Typesetter::new();
+    let f0 = ts0.register_font(NOTO_SANS);
+    ts0.set_default_font(f0, 16.0);
+    ts0.set_viewport(800.0, 600.0);
+    let table0 = TableLayoutParams {
+        table_id: 1,
+        rows: 2,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![
+            make_cell_at(0, 0, 10, 0, "Row A"),
+            make_cell_at(1, 0, 11, 6, "Row B"),
+        ],
+    };
+    ts0.add_table(&table0);
+    ts0.render();
+    let h0 = ts0.content_height();
+    let y0_r0 = ts0.caret_rect(0)[1];
+    let y0_r1 = ts0.caret_rect(6)[1];
+
+    // Table with spacing = 10
+    let mut ts1 = Typesetter::new();
+    let f1 = ts1.register_font(NOTO_SANS);
+    ts1.set_default_font(f1, 16.0);
+    ts1.set_viewport(800.0, 600.0);
+    let table1 = TableLayoutParams {
+        table_id: 1,
+        rows: 2,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 10.0,
+        cell_padding: 4.0,
+        cells: vec![
+            make_cell_at(0, 0, 10, 0, "Row A"),
+            make_cell_at(1, 0, 11, 6, "Row B"),
+        ],
+    };
+    ts1.add_table(&table1);
+    ts1.render();
+    let h1 = ts1.content_height();
+    let y1_r0 = ts1.caret_rect(0)[1];
+    let y1_r1 = ts1.caret_rect(6)[1];
+
+    assert!(
+        h1 > h0,
+        "spaced table should be taller: no_spacing={}, spacing={}",
+        h0,
+        h1
+    );
+
+    let gap_without = y0_r1 - y0_r0;
+    let gap_with = y1_r1 - y1_r0;
+    assert!(
+        gap_with > gap_without,
+        "row gap with spacing ({}) should exceed without ({})",
+        gap_with,
+        gap_without
+    );
+}
+
+#[test]
+fn table_single_row_layout() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+    let table = make_table(
+        1,
+        1,
+        2,
+        vec![
+            make_cell_at(0, 0, 10, 0, "Left"),
+            make_cell_at(0, 1, 11, 5, "Right"),
+        ],
+    );
+    ts.add_table(&table);
+    ts.render();
+
+    assert!(ts.content_height() > 0.0);
+    assert_caret_is_real(ts.caret_rect(0), "single row col 0");
+    assert_caret_is_real(ts.caret_rect(5), "single row col 1");
+
+    // 4 outer borders + 0 row dividers + 1 column divider = 5
+    let frame = ts.render();
+    let border_count = frame.decoration_count(DecorationKind::TableBorder);
+    assert_eq!(
+        border_count, 5,
+        "1-row 2-col table should have 5 border decorations, got {}",
+        border_count
+    );
+}
+
+#[test]
+fn table_single_column_layout() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+    let table = make_table(
+        1,
+        2,
+        1,
+        vec![
+            make_cell_at(0, 0, 10, 0, "Top"),
+            make_cell_at(1, 0, 11, 4, "Bottom"),
+        ],
+    );
+    ts.add_table(&table);
+    ts.render();
+
+    let y0 = ts.caret_rect(0)[1];
+    let y1 = ts.caret_rect(4)[1];
+    assert!(y1 > y0, "row 1 y ({}) should be below row 0 y ({})", y1, y0);
+
+    // 4 outer borders + 1 row divider + 0 column dividers = 5
+    let frame = ts.render();
+    let border_count = frame.decoration_count(DecorationKind::TableBorder);
+    assert_eq!(
+        border_count, 5,
+        "2-row 1-col table should have 5 border decorations, got {}",
+        border_count
+    );
+}
+
+#[test]
+fn table_multiple_blocks_per_cell() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let table = TableLayoutParams {
+        table_id: 1,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![CellLayoutParams {
+            row: 0,
+            column: 0,
+            blocks: vec![
+                make_block_at(20, 0, "First paragraph"),
+                make_block_at(21, 16, "Second paragraph"),
+            ],
+            background_color: None,
+        }],
+    };
+    ts.add_table(&table);
+    ts.render();
+
+    assert_caret_is_real(ts.caret_rect(0), "first block start");
+    assert_caret_is_real(ts.caret_rect(16), "second block start");
+
+    let y0 = ts.caret_rect(0)[1];
+    let y1 = ts.caret_rect(16)[1];
+    assert!(
+        y1 > y0,
+        "second block y ({}) should be below first ({})",
+        y1,
+        y0
+    );
+}
+
+#[test]
+fn table_out_of_bounds_cell_silently_skipped() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    // 1x1 table with a valid cell and an out-of-bounds cell
+    let table = TableLayoutParams {
+        table_id: 1,
+        rows: 1,
+        columns: 1,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![
+            make_cell_at(0, 0, 10, 0, "Valid"),
+            make_cell_at(5, 5, 99, 100, "Out of bounds"),
+        ],
+    };
+    ts.add_table(&table);
+    ts.render();
+
+    assert!(
+        ts.content_height() > 0.0,
+        "table should have positive height"
+    );
+    assert_caret_is_real(ts.caret_rect(0), "valid cell");
+    let frame = ts.render();
+    assert!(!frame.glyphs.is_empty(), "valid cell should produce glyphs");
+}
+
+// ── Caret: single-char relayout ─────────────────────────────────
+
+#[test]
+fn single_char_relayout_does_not_grow_row_height() {
+    let mut ts = setup_table(800.0);
+    ts.render();
+
+    let height_before = ts.content_height();
+
+    // Append one character to "Cell one" (block 12, pos 18) -> "Cell one!"
+    let updated = make_block_at(12, 18, "Cell one!");
+    ts.relayout_block(&updated);
+    ts.render();
+
+    let height_after = ts.content_height();
+    assert!(
+        (height_after - height_before).abs() < 0.01,
+        "adding one char should not grow the table: before={}, after={}",
+        height_before,
+        height_after
+    );
+}
+
+// ── Rendering: borders, backgrounds, overlap ────────────────────
+
+#[test]
+fn table_zero_border_produces_no_border_decorations() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let table = TableLayoutParams {
+        table_id: 1,
+        rows: 2,
+        columns: 2,
+        column_widths: vec![],
+        border_width: 0.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![
+            make_cell_at(0, 0, 10, 0, "A"),
+            make_cell_at(0, 1, 11, 2, "B"),
+            make_cell_at(1, 0, 12, 4, "C"),
+            make_cell_at(1, 1, 13, 6, "D"),
+        ],
+    };
+    ts.add_table(&table);
+    let frame = ts.render();
+
+    let border_count = frame.decoration_count(DecorationKind::TableBorder);
+    assert_eq!(
+        border_count, 0,
+        "zero border_width should produce no TableBorder decorations, got {}",
+        border_count
+    );
+    assert!(!frame.glyphs.is_empty(), "glyphs should still render");
+}
+
+#[test]
+fn table_cell_background_produces_decoration() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let table = TableLayoutParams {
+        table_id: 1,
+        rows: 2,
+        columns: 2,
+        column_widths: vec![],
+        border_width: 1.0,
+        cell_spacing: 0.0,
+        cell_padding: 4.0,
+        cells: vec![
+            CellLayoutParams {
+                row: 0,
+                column: 0,
+                blocks: vec![make_block_at(10, 0, "Highlighted")],
+                background_color: Some([1.0, 0.0, 0.0, 0.5]),
+            },
+            make_cell_at(0, 1, 11, 12, "Normal"),
+            make_cell_at(1, 0, 12, 19, "Normal"),
+            make_cell_at(1, 1, 13, 26, "Normal"),
+        ],
+    };
+    ts.add_table(&table);
+    let frame = ts.render();
+
+    let bg_rects = frame.decorations_of(DecorationKind::TableCellBackground);
+    assert_eq!(
+        bg_rects.len(),
+        1,
+        "exactly one cell has a background, got {}",
+        bg_rects.len()
+    );
+    let bg = &bg_rects[0];
+    assert!(bg.w() > 0.0, "background should have positive width");
+    assert!(bg.h() > 0.0, "background should have positive height");
+}
+
+#[test]
+fn table_border_decoration_count_matches_structure() {
+    let mut ts = setup_table(800.0);
+    let frame = ts.render();
+
+    // 3 rows, 2 cols: 4 outer + 2 row dividers + 1 col divider = 7
+    let border_count = frame.decoration_count(DecorationKind::TableBorder);
+    assert_eq!(
+        border_count, 7,
+        "3x2 table should have 7 border decorations, got {}",
+        border_count
+    );
+}
+
+#[test]
+fn table_no_glyph_overlap_across_cells() {
+    let mut ts = setup_table(800.0);
+    let frame = ts.render();
+    assert_no_glyph_overlap(frame);
+}
+
+// ── Hit-test: column boundary, far right, above table ───────────
+
+#[test]
+fn hit_test_at_column_boundary_snaps_to_nearest_column() {
+    let ts = setup_table(800.0);
+
+    // Find x midpoint between col 0 end and col 1 start in row 0
+    let x_col0_end = ts.caret_rect(8)[0]; // end of "Header A"
+    let x_col1_start = ts.caret_rect(9)[0]; // start of "Header B"
+    let mid_x = (x_col0_end + x_col1_start) / 2.0;
+    let row_y = ts.caret_rect(0)[1] + ts.caret_rect(0)[3] * 0.5;
+
+    let hit = ts.hit_test(mid_x, row_y);
+    assert!(
+        hit.is_some(),
+        "hit_test at column boundary x={} should find a cell",
+        mid_x
+    );
+
+    let bid = hit.unwrap().block_id;
+    assert!(
+        bid == 10 || bid == 11,
+        "should snap to col 0 (block 10) or col 1 (block 11), got block {}",
+        bid
+    );
+}
+
+#[test]
+fn hit_test_far_right_of_table_snaps_to_last_column() {
+    let ts = setup_table(800.0);
+
+    let row_y = ts.caret_rect(0)[1] + ts.caret_rect(0)[3] * 0.5;
+    let hit = ts.hit_test(2000.0, row_y);
+    assert!(
+        hit.is_some(),
+        "hit_test far right should snap to last column"
+    );
+    // Should snap to col 1 (block 11 in row 0)
+    assert_eq!(
+        hit.unwrap().block_id,
+        11,
+        "far right should snap to last column block"
+    );
+}
+
+#[test]
+fn hit_test_above_table_top_finds_first_row() {
+    let ts = setup_table(800.0);
+
+    let r0 = Rect::from(ts.caret_rect(0));
+    // Hit-test 5px above the table's first row
+    let hit = ts.hit_test(r0.x().max(1.0), r0.y() - 5.0);
+    assert!(
+        hit.is_some(),
+        "hit_test above table top should still find a cell"
+    );
+}
+
+#[test]
+fn is_block_in_table_false_for_non_table_block() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    // Add a standalone block first
+    ts.layout_blocks(vec![make_block_at(1, 0, "Standalone")]);
+
+    // Then add a table
+    let table = make_table(1, 1, 1, vec![make_cell_at(0, 0, 20, 12, "In table")]);
+    ts.add_table(&table);
+    ts.render();
+
+    assert!(
+        !ts.is_block_in_table(1),
+        "standalone block should not be in table"
+    );
+    assert!(
+        ts.is_block_in_table(20),
+        "table cell block should be in table"
+    );
+}
+
+// ── Selection and cursor tests ──────────────────────────────────
+
+#[test]
+fn selection_within_single_table_cell() {
+    let mut ts = setup_table(800.0);
+
+    // Select "Head" within "Header A" (positions 0..4)
+    ts.set_cursor(&CursorDisplay {
+        position: 4,
+        anchor: 0,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let sel = frame.selection_rects();
+    assert!(
+        !sel.is_empty(),
+        "selection inside a table cell should produce selection rects"
+    );
+    for (i, r) in sel.iter().enumerate() {
+        assert!(
+            r.w() > 0.0,
+            "selection rect[{}] should have positive width",
+            i
+        );
+        assert!(
+            r.h() > 0.0,
+            "selection rect[{}] should have positive height",
+            i
+        );
+    }
+}
+
+#[test]
+fn selection_across_table_cells() {
+    let mut ts = setup_table(800.0);
+
+    // Select from "Header A" (pos 0) through "Cell one" (pos 22)
+    ts.set_cursor(&CursorDisplay {
+        position: 22,
+        anchor: 0,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let sel = frame.selection_rects();
+    assert!(
+        sel.len() >= 2,
+        "cross-cell selection should produce multiple rects, got {}",
+        sel.len()
+    );
+
+    // Selection rects should span different y values (rows 0 and 1)
+    let min_y = sel.iter().map(|r| r.y()).fold(f32::MAX, f32::min);
+    let max_y = sel.iter().map(|r| r.bottom()).fold(f32::MIN, f32::max);
+    assert!(
+        max_y - min_y > 10.0,
+        "selection should span multiple rows: min_y={}, max_y={}",
+        min_y,
+        max_y
+    );
+}
+
+#[test]
+fn cursor_visible_in_table_cell() {
+    let mut ts = setup_table(800.0);
+
+    // Place cursor at "Cell one" start (pos 18, block 12, row 1)
+    ts.set_cursor(&CursorDisplay {
+        position: 18,
+        anchor: 18,
+        visible: true,
+    });
+    let frame = ts.render();
+
+    let cursor = frame.cursor_rect();
+    assert!(cursor.is_some(), "cursor should be visible in table cell");
+
+    let c = cursor.unwrap();
+    assert!(c.h() > 0.0, "cursor should have positive height");
+
+    // Cursor y should be in row 1's area
+    let row1_y = ts.caret_rect(18)[1];
+    assert!(
+        (c.y() - row1_y).abs() < 5.0,
+        "cursor y ({}) should be near row 1 caret y ({})",
+        c.y(),
+        row1_y
+    );
+}
+
+// ── Mixed content tests ─────────────────────────────────────────
+
+#[test]
+fn two_tables_in_sequence() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let table1 = make_table(1, 1, 1, vec![make_cell_at(0, 0, 10, 0, "Table one")]);
+    ts.add_table(&table1);
+
+    let height_after_one = ts.content_height();
+
+    let table2 = make_table(2, 1, 1, vec![make_cell_at(0, 0, 20, 10, "Table two")]);
+    ts.add_table(&table2);
+    ts.render();
+
+    let height_after_two = ts.content_height();
+    assert!(
+        height_after_two > height_after_one,
+        "two tables should be taller than one: one={}, two={}",
+        height_after_one,
+        height_after_two
+    );
+
+    let y1 = ts.caret_rect(0)[1];
+    let y2 = ts.caret_rect(10)[1];
+    assert!(
+        y2 > y1,
+        "table 2 caret y ({}) should be below table 1 ({})",
+        y2,
+        y1
+    );
+}
+
+// ── Scrolling tests ─────────────────────────────────────────────
+
+#[test]
+fn scroll_offset_shifts_table_caret_positions() {
+    let mut ts = setup_table(800.0);
+    ts.render();
+
+    let y_before = ts.caret_rect(0)[1];
+
+    ts.set_scroll_offset(50.0);
+    ts.render();
+
+    let y_after = ts.caret_rect(0)[1];
+    let delta = y_before - y_after;
+    assert!(
+        (delta - 50.0).abs() < 1.0,
+        "scroll offset of 50 should shift caret y by ~50: before={}, after={}, delta={}",
+        y_before,
+        y_after,
+        delta
+    );
+}
+
+#[test]
+fn content_height_unchanged_after_same_text_relayout() {
+    let mut ts = setup_table(800.0);
+    ts.render();
+
+    let height_before = ts.content_height();
+
+    // Relayout with identical text
+    let same = make_block_at(12, 18, "Cell one");
+    ts.relayout_block(&same);
+    ts.render();
+
+    let height_after = ts.content_height();
+    assert!(
+        (height_after - height_before).abs() < 0.01,
+        "relayout with same text should not change height: before={}, after={}",
+        height_before,
+        height_after
     );
 }

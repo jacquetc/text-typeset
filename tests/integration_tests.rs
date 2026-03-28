@@ -1458,3 +1458,185 @@ Final paragraph after all elements.";
         ys.len()
     );
 }
+
+// ── Typing through table cells ──────────────────────────────────
+
+#[test]
+fn typing_in_all_table_cells_keeps_caret_inside_cell() {
+    let doc = TextDocument::new();
+    let md = "\
+| Alpha | Beta |
+|-------|------|
+| Gamma | Delta |";
+    let op = doc.set_markdown(md).unwrap();
+    op.wait().unwrap();
+
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    // Narrow viewport so text wraps inside cells
+    ts.set_viewport(200.0, 600.0);
+
+    let flow = doc.snapshot_flow();
+    ts.layout_full(&flow);
+
+    // Collect cell block_ids in row-major order from the flow snapshot.
+    let mut cell_block_ids: Vec<usize> = Vec::new();
+    for element in &flow.elements {
+        if let text_document::FlowElementSnapshot::Table(table) = element {
+            for cell in &table.cells {
+                for block in &cell.blocks {
+                    cell_block_ids.push(block.block_id);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        cell_block_ids.len(),
+        4,
+        "2x2 table should have 4 cell blocks, got {}",
+        cell_block_ids.len()
+    );
+
+    // Determine the right boundary for each column.
+    // col 0 right edge = col 1 left edge (the next column's caret start x).
+    // col 1 right edge = viewport width (it's the last column).
+    let col1_start_x = ts.caret_rect(find_block_text_start(&flow, cell_block_ids[1]))[0];
+
+    let cursor = doc.cursor();
+
+    // Type sequences of "char space" -- single characters separated by spaces.
+    // This pattern creates frequent break opportunities at each space,
+    // so the caret should wrap to the next line before overflowing the cell.
+    // 40 "words" for cell 0, 10 for cells 1-3.
+    let chars_40 = "a b c d e f g h i j k l m n o p q r s t \
+                    u v w x y z A B C D E F G H I J K L M N";
+    let chars_10 = "a b c d e f g h i j";
+
+    for (cell_idx, &block_id) in cell_block_ids.iter().enumerate() {
+        // Re-snapshot to get current positions (earlier typing shifted them).
+        let flow = doc.snapshot_flow();
+        ts.layout_full(&flow);
+
+        // Move cursor to the end of this cell's current text.
+        let end_pos = find_block_text_end(&flow, block_id);
+        cursor.set_position(end_pos, text_document::MoveMode::MoveAnchor);
+
+        // Discover the cell's column boundaries.
+        let cell_left_x = ts.caret_rect(find_block_text_start(&flow, block_id))[0];
+        // For column 0 cells, right boundary = col 1 start x.
+        // For column 1 cells, right boundary = viewport width.
+        let is_col0 = cell_idx == 0 || cell_idx == 2;
+        let cell_right_x = if is_col0 { col1_start_x } else { 200.0 };
+
+        // Type the text character by character, prepending a space separator.
+        let text = if cell_idx == 0 { chars_40 } else { chars_10 };
+
+        for (char_idx, ch) in std::iter::once(' ').chain(text.chars()).enumerate() {
+            cursor.insert_text(&ch.to_string()).unwrap();
+
+            let flow = doc.snapshot_flow();
+            ts.layout_full(&flow);
+
+            let pos = cursor.position();
+            let rect = ts.caret_rect(pos);
+
+            // 1. Caret must be real (not the fallback sentinel).
+            //    The sentinel has x=0 and y=-scroll_offset; catch it explicitly.
+            let is_sentinel = rect[0] == 0.0 && rect[2] == 2.0 && rect[3] == 16.0;
+            assert!(
+                !is_sentinel,
+                "cell[{}] char {} '{}': caret fell back to sentinel at pos {}. caret={:?}",
+                cell_idx, char_idx, ch, pos, rect
+            );
+            assert_caret_is_real(
+                rect,
+                &format!("cell[{}] char {} '{}'", cell_idx, char_idx, ch),
+            );
+
+            // 2. Caret x must stay within the cell's column boundaries.
+            //    Left: must not jump before the cell's left edge.
+            assert!(
+                rect[0] >= cell_left_x - 2.0,
+                "cell[{}] char {} '{}': caret x ({}) jumped left of cell ({}). caret={:?}",
+                cell_idx,
+                char_idx,
+                ch,
+                rect[0],
+                cell_left_x,
+                rect
+            );
+            //    Right: must not overflow into the adjacent cell.
+            assert!(
+                rect[0] < cell_right_x,
+                "cell[{}] char {} '{}': caret x ({}) overflowed past cell right edge ({}). \
+                 caret={:?}",
+                cell_idx,
+                char_idx,
+                ch,
+                rect[0],
+                cell_right_x,
+                rect
+            );
+
+            // 3. Caret y must be at or below the cell's row top.
+            let row_top_y = ts.caret_rect(find_block_text_start(&flow, block_id))[1];
+            assert!(
+                rect[1] >= row_top_y - 1.0,
+                "cell[{}] char {} '{}': caret y ({}) is above row top ({}). caret={:?}",
+                cell_idx,
+                char_idx,
+                ch,
+                rect[1],
+                row_top_y,
+                rect
+            );
+
+            // 4. Hit-test at the caret must resolve to a table cell (not escape).
+            let hx = rect[0].max(1.0);
+            let hy = rect[1] + rect[3] * 0.5;
+            if let Some(hit) = ts.hit_test(hx, hy) {
+                assert!(
+                    ts.is_block_in_table(hit.block_id),
+                    "cell[{}] char {} '{}': caret escaped the table! \
+                     hit block {} is not in table. caret={:?}",
+                    cell_idx,
+                    char_idx,
+                    ch,
+                    hit.block_id,
+                    rect
+                );
+            }
+        }
+    }
+
+    fn find_block_text_start(flow: &text_document::FlowSnapshot, block_id: usize) -> usize {
+        for element in &flow.elements {
+            if let text_document::FlowElementSnapshot::Table(table) = element {
+                for cell in &table.cells {
+                    for block in &cell.blocks {
+                        if block.block_id == block_id {
+                            return block.position;
+                        }
+                    }
+                }
+            }
+        }
+        panic!("block_id {} not found in flow snapshot", block_id);
+    }
+
+    fn find_block_text_end(flow: &text_document::FlowSnapshot, block_id: usize) -> usize {
+        for element in &flow.elements {
+            if let text_document::FlowElementSnapshot::Table(table) = element {
+                for cell in &table.cells {
+                    for block in &cell.blocks {
+                        if block.block_id == block_id {
+                            return block.position + block.text.len();
+                        }
+                    }
+                }
+            }
+        }
+        panic!("block_id {} not found in flow snapshot", block_id);
+    }
+}
