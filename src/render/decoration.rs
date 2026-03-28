@@ -14,6 +14,7 @@ pub fn generate_block_decorations(
     x_offset: f32,
     y_offset: f32,
     available_width: f32,
+    default_text_color: [f32; 4],
 ) -> Vec<DecorationRect> {
     let mut decorations = Vec::new();
 
@@ -67,7 +68,7 @@ pub fn generate_block_decorations(
             let run_x = x_offset + block.left_margin + positioned_run.x;
             let run_width = run.advance_width;
             let stroke = metrics.stroke_size.max(1.0);
-            let base_color = decos.foreground_color.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+            let base_color = decos.foreground_color.unwrap_or(default_text_color);
 
             if has_underline {
                 let underline_color = decos.underline_color.unwrap_or(base_color);

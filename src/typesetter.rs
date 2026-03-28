@@ -334,6 +334,7 @@ impl Typesetter {
             &self.cursors,
             self.cursor_color,
             self.selection_color,
+            self.text_color,
             &mut self.render_frame,
         );
         self.rendered_scroll_offset = self.scroll_offset;
@@ -409,6 +410,7 @@ impl Typesetter {
                 &mut self.scale_context,
                 self.scroll_offset,
                 self.viewport_height,
+                self.text_color,
                 &mut tmp,
             );
             new_glyphs = tmp.glyphs;
@@ -425,6 +427,7 @@ impl Typesetter {
                 0.0,
                 0.0,
                 self.flow_layout.viewport_width,
+                self.text_color,
             )
         } else {
             Vec::new()

@@ -25,6 +25,7 @@ pub fn build_render_frame(
     cursors: &[CursorDisplay],
     cursor_color: [f32; 4],
     selection_color: [f32; 4],
+    text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
     render_frame.glyphs.clear();
@@ -75,6 +76,7 @@ pub fn build_render_frame(
                         scale_context,
                         scroll_offset,
                         viewport_height,
+                        text_color,
                         render_frame,
                     );
                     let table_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
@@ -108,6 +110,7 @@ pub fn build_render_frame(
                         scale_context,
                         scroll_offset,
                         viewport_height,
+                        text_color,
                         render_frame,
                     );
                     let frame_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
@@ -138,6 +141,7 @@ pub fn build_render_frame(
                 scale_context,
                 scroll_offset,
                 viewport_height,
+                text_color,
                 render_frame,
             );
             let block_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
@@ -153,6 +157,7 @@ pub fn build_render_frame(
                 0.0,
                 0.0,
                 flow.viewport_width,
+                text_color,
             );
             render_frame
                 .block_decorations
@@ -195,6 +200,7 @@ pub(crate) fn render_block_at_offset(
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
     viewport_height: f32,
+    default_text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
     // Render list marker on the first line (if present)
@@ -213,6 +219,7 @@ pub(crate) fn render_block_at_offset(
                 cache,
                 scale_context,
                 scroll_offset,
+                default_text_color,
                 render_frame,
             );
         }
@@ -263,6 +270,7 @@ pub(crate) fn render_block_at_offset(
                 cache,
                 scale_context,
                 scroll_offset,
+                default_text_color,
                 render_frame,
             );
         }
@@ -284,6 +292,7 @@ fn render_table_cells(
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
     viewport_height: f32,
+    default_text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
     for cell in &table.cell_layouts {
@@ -304,6 +313,7 @@ fn render_table_cells(
                 scale_context,
                 scroll_offset,
                 viewport_height,
+                default_text_color,
                 render_frame,
             );
             let cell_w = table
@@ -319,6 +329,7 @@ fn render_table_cells(
                 cell_x,
                 cell_y,
                 cell_w,
+                default_text_color,
             );
             render_frame.decorations.extend(decos);
         }
@@ -334,6 +345,7 @@ fn render_frame_layout(
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
     viewport_height: f32,
+    default_text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
     let offset_x = frame.x + frame.content_x;
@@ -351,6 +363,7 @@ fn render_frame_layout(
             scale_context,
             scroll_offset,
             viewport_height,
+            default_text_color,
             render_frame,
         );
         let decos = generate_block_decorations(
@@ -361,6 +374,7 @@ fn render_frame_layout(
             offset_x,
             offset_y,
             frame.content_width,
+            default_text_color,
         );
         render_frame.decorations.extend(decos);
     }
@@ -377,6 +391,7 @@ fn render_frame_layout(
             scale_context,
             scroll_offset,
             viewport_height,
+            default_text_color,
             render_frame,
         );
     }
@@ -395,6 +410,7 @@ fn render_frame_layout(
             scale_context,
             scroll_offset,
             viewport_height,
+            default_text_color,
             render_frame,
         );
     }
@@ -477,6 +493,7 @@ fn render_nested_frame(
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
     viewport_height: f32,
+    default_text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
     let frame_x = parent_x + nested.x;
@@ -496,6 +513,7 @@ fn render_nested_frame(
             scale_context,
             scroll_offset,
             viewport_height,
+            default_text_color,
             render_frame,
         );
         let decos = generate_block_decorations(
@@ -506,6 +524,7 @@ fn render_nested_frame(
             content_x,
             content_y,
             nested.content_width,
+            default_text_color,
         );
         render_frame.decorations.extend(decos);
     }
@@ -522,6 +541,7 @@ fn render_nested_frame(
             scale_context,
             scroll_offset,
             viewport_height,
+            default_text_color,
             render_frame,
         );
     }
@@ -538,6 +558,7 @@ fn render_nested_frame(
             scale_context,
             scroll_offset,
             viewport_height,
+            default_text_color,
             render_frame,
         );
     }
@@ -577,6 +598,7 @@ fn render_run_glyphs(
     cache: &mut GlyphCache,
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
+    default_text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
     let mut pen_x = start_x;
@@ -613,7 +635,7 @@ fn render_run_glyphs(
             let color = if cached.is_color {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
-                run.foreground_color.unwrap_or([0.0, 0.0, 0.0, 1.0])
+                run.foreground_color.unwrap_or(default_text_color)
             };
             render_frame.glyphs.push(GlyphQuad {
                 screen: [
