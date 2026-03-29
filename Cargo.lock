@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "text-typeset"
-version = "0.0.7"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "etagere",
