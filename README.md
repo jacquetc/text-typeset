@@ -29,7 +29,9 @@ text-document (model) --> text-typeset (shaping + layout) --> framework adapter 
 - **Letter spacing** and **word spacing**
 - **Hit testing**: screen coordinates to document position with region detection (text, margin, link, image)
 - **Cursor display** with caret rendering, blink support, multi-cursor, and selection painting with full-width line highlighting
-- **Scrolling**: `ensure_caret_visible`, `scroll_to_position`, viewport culling
+- **Zoom**: display zoom (0.1x to 10x) without text reflow, scales all output coordinates
+- **Cell-level selection**: table cell highlighting via `selected_cells` in cursor display
+- **Scrolling**: `ensure_caret_visible`, `scroll_to_position` (automatic 1/3-viewport placement), viewport culling
 - **Incremental relayout**: update a single block without re-laying-out the entire document
 - **Content width modes**: auto (follows viewport) or fixed (for page-like WYSIWYG layout)
 
@@ -48,25 +50,21 @@ The rendering contract is thin: "draw N sub-rects from a texture + M colored rec
 
 ```rust
 use text_typeset::Typesetter;
-use text_document::TextDocument;
 
-// Set up the typesetter
-let mut typesetter = Typesetter::new();
-let font = typesetter.register_font(include_bytes!("fonts/NotoSans.ttf"));
-typesetter.set_default_font(font, 16.0);
-typesetter.set_viewport(800.0, 600.0);
+let mut ts = Typesetter::new();
+let font = ts.register_font(include_bytes!("test-fonts/NotoSans-Variable.ttf"));
+ts.set_default_font(font, 16.0);
+ts.set_viewport(800.0, 600.0);
 
-// Load a document
-let doc = TextDocument::new();
+// With text-document (default feature):
+let doc = text_document::TextDocument::new();
 doc.set_plain_text("Hello, world!").unwrap();
+ts.layout_full(&doc.snapshot_flow());
 
-// Layout and render
-typesetter.layout_full(&doc.snapshot_flow());
-let frame = typesetter.render();
-
-// frame.glyphs    -> glyph quads to draw
-// frame.atlas_pixels -> RGBA texture data
-// frame.decorations  -> cursor, selection, underlines
+let frame = ts.render();
+// frame.glyphs      -> glyph quads (textured rects from atlas)
+// frame.atlas_pixels -> RGBA texture to upload
+// frame.decorations  -> cursor, selection, underlines, borders
 ```
 
 ## Content width
