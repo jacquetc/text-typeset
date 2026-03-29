@@ -751,8 +751,7 @@ impl Typesetter {
         }
         let pos = self.cursors[0].position;
         // Work in 1x (document) coordinates so scroll_offset stays in document space
-        let rect =
-            crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, pos);
+        let rect = crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, pos);
         let caret_screen_y = rect[1];
         let caret_screen_bottom = caret_screen_y + rect[3];
         let effective_vh = self.viewport_height / self.zoom;

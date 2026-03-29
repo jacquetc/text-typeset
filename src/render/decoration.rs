@@ -6,6 +6,7 @@ use crate::types::{DecorationKind, DecorationRect, UnderlineStyle};
 
 /// Generate decoration rects (underline, strikeout, overline) for a block.
 /// `x_offset` and `y_offset` are added when the block is inside a table cell or frame.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_block_decorations(
     block: &BlockLayout,
     registry: &FontRegistry,

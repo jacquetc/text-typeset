@@ -2361,10 +2361,30 @@ fn zoom_2x_scales_glyph_coordinates() {
 
     assert_eq!(glyphs_1x.len(), glyphs_2x.len());
     for (g1, g2) in glyphs_1x.iter().zip(glyphs_2x.iter()) {
-        assert!((g2[0] - g1[0] * 2.0).abs() < 0.01, "x: {} vs {}", g2[0], g1[0] * 2.0);
-        assert!((g2[1] - g1[1] * 2.0).abs() < 0.01, "y: {} vs {}", g2[1], g1[1] * 2.0);
-        assert!((g2[2] - g1[2] * 2.0).abs() < 0.01, "w: {} vs {}", g2[2], g1[2] * 2.0);
-        assert!((g2[3] - g1[3] * 2.0).abs() < 0.01, "h: {} vs {}", g2[3], g1[3] * 2.0);
+        assert!(
+            (g2[0] - g1[0] * 2.0).abs() < 0.01,
+            "x: {} vs {}",
+            g2[0],
+            g1[0] * 2.0
+        );
+        assert!(
+            (g2[1] - g1[1] * 2.0).abs() < 0.01,
+            "y: {} vs {}",
+            g2[1],
+            g1[1] * 2.0
+        );
+        assert!(
+            (g2[2] - g1[2] * 2.0).abs() < 0.01,
+            "w: {} vs {}",
+            g2[2],
+            g1[2] * 2.0
+        );
+        assert!(
+            (g2[3] - g1[3] * 2.0).abs() < 0.01,
+            "h: {} vs {}",
+            g2[3],
+            g1[3] * 2.0
+        );
     }
 }
 
@@ -2398,7 +2418,10 @@ fn zoom_does_not_change_content_height() {
     ts.set_zoom(3.0);
     let h2 = ts.content_height();
 
-    assert!((h1 - h2).abs() < 0.001, "content_height should not change with zoom");
+    assert!(
+        (h1 - h2).abs() < 0.001,
+        "content_height should not change with zoom"
+    );
 }
 
 #[test]
@@ -2469,8 +2492,18 @@ fn zoom_decorations_scale() {
 
     assert_eq!(underlines_1x.len(), underlines_2x.len());
     for (u1, u2) in underlines_1x.iter().zip(underlines_2x.iter()) {
-        assert!((u2[0] - u1[0] * 2.0).abs() < 0.5, "x: {} vs {}", u2[0], u1[0] * 2.0);
-        assert!((u2[1] - u1[1] * 2.0).abs() < 0.5, "y: {} vs {}", u2[1], u1[1] * 2.0);
+        assert!(
+            (u2[0] - u1[0] * 2.0).abs() < 0.5,
+            "x: {} vs {}",
+            u2[0],
+            u1[0] * 2.0
+        );
+        assert!(
+            (u2[1] - u1[1] * 2.0).abs() < 0.5,
+            "y: {} vs {}",
+            u2[1],
+            u1[1] * 2.0
+        );
     }
 }
 
@@ -2528,10 +2561,7 @@ fn zoom_render_cursor_only_scales_cursor() {
 #[test]
 fn zoom_render_block_only_scales_output() {
     let mut ts = make_typesetter();
-    ts.layout_blocks(vec![
-        make_block(1, "First"),
-        make_block(2, "Second"),
-    ]);
+    ts.layout_blocks(vec![make_block(1, "First"), make_block(2, "Second")]);
     ts.set_zoom(2.0);
     ts.render();
 

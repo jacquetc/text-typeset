@@ -362,13 +362,13 @@ fn multiple_cursors() {
             position: 2,
             anchor: 2,
             visible: true,
-        selected_cells: vec![],
+            selected_cells: vec![],
         },
         text_typeset::CursorDisplay {
             position: 7,
             anchor: 7,
             visible: true,
-        selected_cells: vec![],
+            selected_cells: vec![],
         },
     ]);
     let frame = ts.render();
