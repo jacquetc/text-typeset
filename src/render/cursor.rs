@@ -19,8 +19,8 @@ pub fn generate_cursor_decorations(
     let mut decorations = Vec::new();
 
     for cursor in cursors {
+        // Cell-level selection highlights (whole cells).
         if !cursor.selected_cells.is_empty() {
-            // Cell-level selection: highlight entire cells instead of text ranges.
             compute_cell_selection_rects(
                 flow,
                 scroll_offset,
@@ -28,8 +28,12 @@ pub fn generate_cursor_decorations(
                 selection_color,
                 &mut decorations,
             );
-        } else if cursor.anchor != cursor.position {
-            // Text-level selection highlight
+        }
+
+        // Text-level selection highlight.
+        // For mixed selections (text + cells), this renders the text
+        // portion while skipping blocks inside cell-selected tables.
+        if cursor.anchor != cursor.position {
             let sel_start = cursor.anchor.min(cursor.position);
             let sel_end = cursor.anchor.max(cursor.position);
             let sel_rects = compute_selection_rects(
@@ -40,6 +44,7 @@ pub fn generate_cursor_decorations(
                 selection_color,
                 viewport_width,
                 viewport_height,
+                &cursor.selected_cells,
             );
             decorations.extend(sel_rects);
         }
@@ -73,6 +78,7 @@ fn compute_selection_rects(
     color: [f32; 4],
     viewport_width: f32,
     viewport_height: f32,
+    selected_cells: &[(usize, usize, usize)],
 ) -> Vec<DecorationRect> {
     let mut rects = Vec::new();
     let view_top = scroll_offset;
@@ -137,6 +143,14 @@ fn compute_selection_rects(
                 }
                 if *y > view_bottom {
                     break;
+                }
+                // Skip text selection for tables that have cell-level selection
+                // (the cell highlight already covers them).
+                if selected_cells
+                    .iter()
+                    .any(|(tid, _, _)| *tid == *table_id)
+                {
+                    continue;
                 }
                 if let Some(table) = flow.tables.get(table_id) {
                     for cell in &table.cell_layouts {
