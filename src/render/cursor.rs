@@ -70,6 +70,7 @@ pub fn generate_cursor_decorations(
 /// When a selection continues past the end of a line (multi-line selection),
 /// the highlight extends to the viewport width - matching the behavior of
 /// VS Code, Sublime Text, and other modern editors.
+#[allow(clippy::too_many_arguments)]
 fn compute_selection_rects(
     flow: &FlowLayout,
     scroll_offset: f32,
@@ -146,10 +147,7 @@ fn compute_selection_rects(
                 }
                 // Skip text selection for tables that have cell-level selection
                 // (the cell highlight already covers them).
-                if selected_cells
-                    .iter()
-                    .any(|(tid, _, _)| *tid == *table_id)
-                {
+                if selected_cells.iter().any(|(tid, _, _)| *tid == *table_id) {
                     continue;
                 }
                 if let Some(table) = flow.tables.get(table_id) {
