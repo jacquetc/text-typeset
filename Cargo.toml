@@ -8,7 +8,7 @@ documentation = "https://docs.rs/text-typeset/"
 description = "Turns rich text documents into GPU-ready glyph quads"
 keywords = ["text", "document", "format"]
 categories = ["text-editors", "text-processing"]
-license = "MIT OR Apache-2.0"
+license = "MPL-2.0"
 readme = "README.md"
 edition = "2024"
 
