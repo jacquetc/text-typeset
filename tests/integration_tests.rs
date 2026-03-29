@@ -126,6 +126,7 @@ fn cursor_and_selection_on_document() {
         position: 7,
         anchor: 11,
         visible: true,
+        selected_cells: vec![],
     });
 
     let frame = ts.render();
@@ -429,6 +430,7 @@ fn selection_spanning_blockquote_boundary() {
         position: 0,
         anchor: 10,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -476,6 +478,7 @@ fn ensure_caret_visible_inside_blockquote() {
         position: deep_pos,
         anchor: deep_pos,
         visible: true,
+        selected_cells: vec![],
     });
 
     let result = ts.ensure_caret_visible();
@@ -684,6 +687,7 @@ fn selection_spanning_nested_blockquote() {
         position: start,
         anchor: end,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 

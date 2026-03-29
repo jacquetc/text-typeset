@@ -196,6 +196,7 @@ fn cursor_produces_caret_decoration() {
         position: 5,
         anchor: 5,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -217,6 +218,7 @@ fn invisible_cursor_produces_no_caret() {
         position: 3,
         anchor: 3,
         visible: false, // blink off
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -239,6 +241,7 @@ fn selection_produces_highlight_rects() {
         position: 0,
         anchor: 5, // select "Hello"
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -266,6 +269,7 @@ fn no_selection_when_anchor_equals_position() {
         position: 3,
         anchor: 3, // no selection
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -292,6 +296,7 @@ fn multi_line_selection_extends_to_viewport_width() {
         position: 0,
         anchor: 24, // past both blocks
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -327,6 +332,7 @@ fn single_line_selection_does_not_extend() {
         position: 6,
         anchor: 11,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -356,11 +362,13 @@ fn multiple_cursors() {
             position: 2,
             anchor: 2,
             visible: true,
+        selected_cells: vec![],
         },
         text_typeset::CursorDisplay {
             position: 7,
             anchor: 7,
             visible: true,
+        selected_cells: vec![],
         },
     ]);
     let frame = ts.render();
@@ -410,6 +418,7 @@ fn ensure_caret_visible_when_already_visible() {
         position: 0,
         anchor: 0,
         visible: true,
+        selected_cells: vec![],
     });
 
     // Content fits in viewport — caret is already visible
@@ -442,6 +451,7 @@ fn ensure_caret_visible_scrolls_down_when_needed() {
         position: 300, // deep in the document
         anchor: 300,
         visible: true,
+        selected_cells: vec![],
     });
 
     let result = ts.ensure_caret_visible();
@@ -666,6 +676,7 @@ fn selection_highlights_text_inside_table_cell() {
         position: 8,
         anchor: 3,
         visible: true,
+        selected_cells: vec![],
     });
     let block1_height = ts.block_visual_info(1).unwrap().height;
     let frame = ts.render();
@@ -715,6 +726,7 @@ fn selection_highlights_text_inside_frame() {
         position: 8,
         anchor: 3,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -1312,6 +1324,7 @@ fn selection_inside_nested_frame() {
         position: 9,
         anchor: 14,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 

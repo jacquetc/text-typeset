@@ -924,6 +924,7 @@ fn selection_within_single_table_cell() {
         position: 4,
         anchor: 0,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -955,6 +956,7 @@ fn selection_across_table_cells() {
         position: 22,
         anchor: 0,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
@@ -985,6 +987,7 @@ fn cursor_visible_in_table_cell() {
         position: 18,
         anchor: 18,
         visible: true,
+        selected_cells: vec![],
     });
     let frame = ts.render();
 
