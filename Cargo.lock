@@ -1078,9 +1078,9 @@ dependencies = [
 
 [[package]]
 name = "swash"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47846491253e976bdd07d0f9cc24b7daf24720d11309302ccbbc6e6b6e53550a"
+checksum = "842f3cd369c2ba38966204f983eaa5e54a8e84a7d7159ed36ade2b6c335aae64"
 dependencies = [
  "skrifa",
  "yazi",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "text-document"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1123,7 +1123,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-common"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-direct-access"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1153,7 +1153,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-editing"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1166,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-formatting"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-frontend"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1196,7 +1196,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-inspection"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1209,7 +1209,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-io"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-macros"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "text-document-search"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "chrono",

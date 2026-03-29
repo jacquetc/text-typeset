@@ -19,16 +19,16 @@ text-document = ["dep:text-document"]
 [dependencies]
 rustybuzz = "0.20"
 swash = "0.2"
-fontdb = "0.23"
+fontdb = "0.23.0"
 etagere = "0.3"
 unicode-linebreak = "0.1"
 unicode-bidi = "0.3"
 anyhow = "1.0"
 thiserror = "2.0"
-text-document = { path = "../text-document/crates/public_api", version = "1.1.0", optional = true }
+text-document = { path = "../text-document/crates/public_api", version = "1.2.0", optional = true }
 
 [dev-dependencies]
-text-document = { path = "../text-document/crates/public_api", version = "1.1.0" }
+text-document = { path = "../text-document/crates/public_api", version = "1.2.0" }
 
 [profile.release]
 lto = "fat"
