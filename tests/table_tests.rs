@@ -5,7 +5,7 @@
 mod helpers;
 use helpers::{
     NOTO_SANS, Rect, RenderFrameExt, assert_caret_is_real, assert_no_glyph_overlap, make_block_at,
-    make_cell_at, make_table,
+    make_cell_at, make_frame, make_table,
 };
 
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
@@ -1084,5 +1084,163 @@ fn content_height_unchanged_after_same_text_relayout() {
         "relayout with same text should not change height: before={}, after={}",
         height_before,
         height_after
+    );
+}
+
+// ── Table-ID in HitTestResult ────────────────────────────────────
+
+#[test]
+fn hit_test_table_cells_report_table_id() {
+    let ts = setup_table(800.0);
+
+    // Hit test the first cell in each row
+    for (label, pos) in [("row 0", 0usize), ("row 1", 18), ("row 2", 36)] {
+        let rect = ts.caret_rect(pos);
+        let hx = rect[0].max(1.0);
+        let hy = rect[1] + rect[3] * 0.5;
+        let hit = ts.hit_test(hx, hy).unwrap();
+        assert_eq!(
+            hit.table_id,
+            Some(1),
+            "cell {} hit should report table_id=Some(1), got {:?}",
+            label,
+            hit.table_id
+        );
+    }
+}
+
+#[test]
+fn hit_test_all_cells_have_consistent_table_id() {
+    let ts = setup_table(800.0);
+
+    // Start position of every cell block in the 3x2 table
+    for (pos, label) in [
+        (0, "row0 col0"),
+        (9, "row0 col1"),
+        (18, "row1 col0"),
+        (27, "row1 col1"),
+        (36, "row2 col0"),
+        (47, "row2 col1"),
+    ] {
+        let rect = ts.caret_rect(pos);
+        let hit = ts
+            .hit_test(rect[0].max(1.0), rect[1] + rect[3] * 0.5)
+            .unwrap();
+        assert_eq!(
+            hit.table_id,
+            Some(1),
+            "cell {} (pos {}) should report table_id=Some(1), got {:?}",
+            label,
+            pos,
+            hit.table_id
+        );
+    }
+}
+
+#[test]
+fn hit_test_block_before_table_has_no_table_id() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    // Place a top-level block before the table, then add the table.
+    ts.layout_blocks(vec![make_block_at(99, 0, "Before table")]);
+    ts.add_table(&make_3x2_table());
+    ts.render();
+
+    // block_visual_info gives the physical y of the top-level block (which is
+    // above the table in the flow). caret_rect(0) would resolve to the table
+    // cell at position 0 instead, so we don't use it here.
+    let info = ts.block_visual_info(99).unwrap();
+    let hit = ts.hit_test(40.0, info.y + info.height * 0.5).unwrap();
+    assert_eq!(
+        hit.table_id, None,
+        "block hit before table should have table_id=None, got {:?}",
+        hit.table_id
+    );
+}
+
+#[test]
+fn hit_test_two_tables_return_correct_ids() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let table1 = make_table(
+        1,
+        1,
+        2,
+        vec![
+            make_cell_at(0, 0, 10, 0, "T1-A"),
+            make_cell_at(0, 1, 11, 5, "T1-B"),
+        ],
+    );
+    let table2 = make_table(
+        2,
+        1,
+        2,
+        vec![
+            make_cell_at(0, 0, 20, 100, "T2-A"),
+            make_cell_at(0, 1, 21, 105, "T2-B"),
+        ],
+    );
+    ts.add_table(&table1);
+    ts.add_table(&table2);
+    ts.render();
+
+    // Hit first table via its known block position
+    let r1 = ts.caret_rect(0);
+    let hit1 = ts.hit_test(r1[0].max(1.0), r1[1] + r1[3] * 0.5).unwrap();
+    assert_eq!(
+        hit1.table_id,
+        Some(1),
+        "first table hit should report table_id=Some(1), got {:?}",
+        hit1.table_id
+    );
+
+    // Hit second table via its known block position
+    let r2 = ts.caret_rect(100);
+    let hit2 = ts.hit_test(r2[0].max(1.0), r2[1] + r2[3] * 0.5).unwrap();
+    assert_eq!(
+        hit2.table_id,
+        Some(2),
+        "second table hit should report table_id=Some(2), got {:?}",
+        hit2.table_id
+    );
+}
+
+#[test]
+fn hit_test_table_inside_frame_has_table_id() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+    ts.set_viewport(800.0, 600.0);
+
+    let table = make_table(
+        7,
+        1,
+        2,
+        vec![
+            make_cell_at(0, 0, 30, 0, "Frame T-A"),
+            make_cell_at(0, 1, 31, 10, "Frame T-B"),
+        ],
+    );
+    let mut frame = make_frame(5, vec![]);
+    frame.tables = vec![(0, table)];
+    ts.add_frame(&frame);
+    ts.render();
+
+    // caret_rect searches table cell blocks including those inside frames
+    let rect = ts.caret_rect(0);
+    let hit = ts
+        .hit_test(rect[0].max(1.0), rect[1] + rect[3] * 0.5)
+        .unwrap();
+    assert_eq!(
+        hit.table_id,
+        Some(7),
+        "table inside frame should report table_id=Some(7), got {:?}",
+        hit.table_id
     );
 }

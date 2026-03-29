@@ -1338,3 +1338,19 @@ fn selection_inside_nested_frame() {
         "selection inside nested frame should produce selection rects"
     );
 }
+
+// ── Table-ID in HitTestResult ────────────────────────────────────
+
+#[test]
+fn hit_test_plain_block_has_no_table_id() {
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![make_block(1, "Hello world")]);
+    ts.render();
+
+    let result = ts.hit_test(40.0, 10.0).unwrap();
+    assert_eq!(
+        result.table_id, None,
+        "block-only hit should have table_id=None, got {:?}",
+        result.table_id
+    );
+}

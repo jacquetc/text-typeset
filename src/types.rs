@@ -163,6 +163,10 @@ pub struct HitTestResult {
     pub region: HitRegion,
     /// Tooltip text if the hit position has a tooltip. None otherwise.
     pub tooltip: Option<String>,
+    /// When non-None, the hit position is inside a table cell.
+    /// Identifies the table by its stable table ID.
+    /// None for hits on top-level blocks, frame blocks, or outside any table.
+    pub table_id: Option<usize>,
 }
 
 /// What region of the layout a hit test landed in.

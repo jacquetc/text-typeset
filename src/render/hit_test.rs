@@ -99,6 +99,7 @@ fn hit_test_block(
             offset_in_block: 0,
             region: HitRegion::LeftMargin,
             tooltip: None,
+            table_id: None,
         });
     }
 
@@ -117,6 +118,7 @@ fn hit_test_block(
                     offset_in_block: first_line.char_range.start,
                     region: HitRegion::BelowContent,
                     tooltip: None,
+                    table_id: None,
                 });
             }
             // Below all lines: return end of last line
@@ -127,6 +129,7 @@ fn hit_test_block(
                     offset_in_block: last_line.char_range.end,
                     region: HitRegion::BelowContent,
                     tooltip: None,
+                    table_id: None,
                 });
             }
             return Some(HitTestResult {
@@ -135,6 +138,7 @@ fn hit_test_block(
                 offset_in_block: 0,
                 region: HitRegion::BelowContent,
                 tooltip: None,
+                table_id: None,
             });
         }
     };
@@ -149,6 +153,7 @@ fn hit_test_block(
         offset_in_block,
         region,
         tooltip,
+        table_id: None,
     })
 }
 
@@ -310,17 +315,28 @@ fn hit_test_table_content(
     let cell_y = base_y + table.y + table.row_ys[row];
 
     // Find block within the cell
+    let tid = table.table_id;
     let cell_local_y = doc_y - cell_y;
     for block in &cell.blocks {
         let block_bottom = block.y + block.height;
         if cell_local_y >= block.y && cell_local_y < block_bottom {
-            return hit_test_block(block.block_id, block, doc_y, x, cell_x, cell_y);
+            return hit_test_block(block.block_id, block, doc_y, x, cell_x, cell_y).map(|r| {
+                HitTestResult {
+                    table_id: Some(tid),
+                    ..r
+                }
+            });
         }
     }
 
     // Fallback: last block in cell
     if let Some(block) = cell.blocks.last() {
-        return hit_test_block(block.block_id, block, doc_y, x, cell_x, cell_y);
+        return hit_test_block(block.block_id, block, doc_y, x, cell_x, cell_y).map(|r| {
+            HitTestResult {
+                table_id: Some(tid),
+                ..r
+            }
+        });
     }
 
     None
