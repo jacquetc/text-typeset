@@ -83,11 +83,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-
       - name: Prepare release files
         run: |
           mkdir -p release
