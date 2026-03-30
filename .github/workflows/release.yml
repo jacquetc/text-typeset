@@ -103,7 +103,5 @@ jobs:
           body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          files: |
-            release/*
           generate_release_notes: true
           fail_on_unmatched_files: true
