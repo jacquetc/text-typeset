@@ -228,6 +228,46 @@ pub struct BlockVisualInfo {
     pub height: f32,
 }
 
+// ── Single-line API ────────────────────────────────────────────
+
+/// Text formatting parameters for the single-line layout API.
+///
+/// Controls font selection, size, and text color. All fields are optional
+/// and fall back to the typesetter's defaults (default font, default size,
+/// default text color).
+#[derive(Clone, Debug, Default)]
+pub struct TextFormat {
+    /// Font family name (e.g., "Noto Sans", "monospace").
+    /// None means use the default font.
+    pub font_family: Option<String>,
+    /// Font weight (100-900). Overrides `font_bold`.
+    pub font_weight: Option<u32>,
+    /// Shorthand for weight 700. Ignored if `font_weight` is set.
+    pub font_bold: Option<bool>,
+    /// Italic style.
+    pub font_italic: Option<bool>,
+    /// Font size in pixels. None means use the default size.
+    pub font_size: Option<f32>,
+    /// Text color (RGBA, 0.0-1.0). None means use the typesetter's text color.
+    pub color: Option<[f32; 4]>,
+}
+
+/// Result of [`crate::Typesetter::layout_single_line`].
+///
+/// Contains the measured dimensions and GPU-ready glyph quads for a
+/// single line of text. No flow layout, line breaking, or bidi analysis
+/// is performed.
+pub struct SingleLineResult {
+    /// Total advance width of the shaped text, in pixels.
+    pub width: f32,
+    /// Line height (ascent + descent + leading), in pixels.
+    pub height: f32,
+    /// Distance from the top of the line to the baseline, in pixels.
+    pub baseline: f32,
+    /// GPU-ready glyph quads, positioned at y=0 (no scroll offset).
+    pub glyphs: Vec<GlyphQuad>,
+}
+
 impl RenderFrame {
     pub(crate) fn new() -> Self {
         Self {

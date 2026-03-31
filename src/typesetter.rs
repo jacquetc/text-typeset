@@ -1,8 +1,12 @@
 use crate::atlas::allocator::GlyphAtlas;
-use crate::atlas::cache::GlyphCache;
+use crate::atlas::cache::{GlyphCache, GlyphCacheKey};
+use crate::atlas::rasterizer::rasterize_glyph;
 use crate::font::registry::FontRegistry;
 use crate::layout::flow::{FlowItem, FlowLayout};
-use crate::types::{BlockVisualInfo, CursorDisplay, FontFaceId, HitTestResult, RenderFrame};
+use crate::types::{
+    BlockVisualInfo, CursorDisplay, FontFaceId, GlyphQuad, HitTestResult, RenderFrame,
+    SingleLineResult, TextFormat,
+};
 
 /// How the content (layout) width is determined.
 ///
@@ -610,6 +614,233 @@ impl Typesetter {
             let copy_len = needed.min(pixels.len());
             self.render_frame.atlas_pixels[..copy_len].copy_from_slice(&pixels[..copy_len]);
             self.atlas.dirty = false;
+        }
+    }
+
+    // ── Single-line layout ───────────────────────────────────────
+
+    /// Lay out a single line of text and return GPU-ready glyph quads.
+    ///
+    /// This is the fast path for simple labels, tooltips, overlays, and other
+    /// single-line text that does not need the full document layout pipeline.
+    ///
+    /// What it does:
+    /// - Resolves the font from `format` (family, weight, italic, size).
+    /// - Shapes the text with rustybuzz (including glyph fallback).
+    /// - Rasterizes glyphs into the atlas (same path as the full pipeline).
+    /// - If `max_width` is provided and the text exceeds it, truncates with
+    ///   an ellipsis character.
+    ///
+    /// What it skips:
+    /// - Line breaking (there is only one line).
+    /// - Bidi analysis (assumes a single direction run).
+    /// - Flow layout, margins, indents, block stacking.
+    ///
+    /// Glyph quads are positioned with the top-left at (0, 0).
+    pub fn layout_single_line(
+        &mut self,
+        text: &str,
+        format: &TextFormat,
+        max_width: Option<f32>,
+    ) -> SingleLineResult {
+        use crate::font::resolve::resolve_font;
+        use crate::shaping::shaper::{font_metrics_px, shape_text};
+
+        let empty = SingleLineResult {
+            width: 0.0,
+            height: 0.0,
+            baseline: 0.0,
+            glyphs: Vec::new(),
+        };
+
+        if text.is_empty() {
+            return empty;
+        }
+
+        // Resolve font from TextFormat fields
+        let font_point_size = format.font_size.map(|s| s as u32);
+        let resolved = match resolve_font(
+            &self.font_registry,
+            format.font_family.as_deref(),
+            format.font_weight,
+            format.font_bold,
+            format.font_italic,
+            font_point_size,
+        ) {
+            Some(r) => r,
+            None => return empty,
+        };
+
+        // Get font metrics for line height
+        let metrics = match font_metrics_px(&self.font_registry, &resolved) {
+            Some(m) => m,
+            None => return empty,
+        };
+        let line_height = metrics.ascent + metrics.descent + metrics.leading;
+        let baseline = metrics.ascent;
+
+        // Shape the text
+        let run = match shape_text(&self.font_registry, &resolved, text, 0) {
+            Some(r) => r,
+            None => return empty,
+        };
+
+        // Determine which glyphs to render (truncation with ellipsis if needed)
+        let (glyphs_to_render, final_width, ellipsis_run) =
+            if let Some(max_w) = max_width
+                && run.advance_width > max_w
+            {
+                // Shape the ellipsis character
+                let ellipsis_run = shape_text(&self.font_registry, &resolved, "\u{2026}", 0);
+                let ellipsis_width = ellipsis_run
+                    .as_ref()
+                    .map(|r| r.advance_width)
+                    .unwrap_or(0.0);
+                let budget = (max_w - ellipsis_width).max(0.0);
+
+                // Find how many glyphs fit within budget
+                let mut used = 0.0f32;
+                let mut count = 0;
+                for g in &run.glyphs {
+                    if used + g.x_advance > budget {
+                        break;
+                    }
+                    used += g.x_advance;
+                    count += 1;
+                }
+
+                (&run.glyphs[..count], used + ellipsis_width, ellipsis_run)
+            } else {
+                (&run.glyphs[..], run.advance_width, None)
+            };
+
+        // Rasterize glyphs and build GlyphQuads
+        let text_color = format.color.unwrap_or(self.text_color);
+        let mut quads = Vec::with_capacity(glyphs_to_render.len() + 1);
+        let mut pen_x = 0.0f32;
+
+        for glyph in glyphs_to_render {
+            self.rasterize_glyph_quad(
+                glyph,
+                &run,
+                pen_x,
+                baseline,
+                text_color,
+                &mut quads,
+            );
+            pen_x += glyph.x_advance;
+        }
+
+        // Render ellipsis glyphs if truncated
+        if let Some(ref e_run) = ellipsis_run {
+            for glyph in &e_run.glyphs {
+                self.rasterize_glyph_quad(
+                    glyph,
+                    e_run,
+                    pen_x,
+                    baseline,
+                    text_color,
+                    &mut quads,
+                );
+                pen_x += glyph.x_advance;
+            }
+        }
+
+        SingleLineResult {
+            width: final_width,
+            height: line_height,
+            baseline,
+            glyphs: quads,
+        }
+    }
+
+    /// Rasterize a single glyph and append a GlyphQuad to the output vec.
+    ///
+    /// Shared helper for `layout_single_line`. Handles cache lookup,
+    /// rasterization on miss, and atlas allocation.
+    fn rasterize_glyph_quad(
+        &mut self,
+        glyph: &crate::shaping::run::ShapedGlyph,
+        run: &crate::shaping::run::ShapedRun,
+        pen_x: f32,
+        baseline: f32,
+        text_color: [f32; 4],
+        quads: &mut Vec<GlyphQuad>,
+    ) {
+        if glyph.glyph_id == 0 {
+            return;
+        }
+
+        let entry = match self.font_registry.get(glyph.font_face_id) {
+            Some(e) => e,
+            None => return,
+        };
+
+        let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, run.size_px);
+
+        // Ensure glyph is cached (rasterize on miss)
+        if self.glyph_cache.peek(&cache_key).is_none()
+            && let Some(image) = rasterize_glyph(
+                &mut self.scale_context,
+                &entry.data,
+                entry.face_index,
+                entry.swash_cache_key,
+                glyph.glyph_id,
+                run.size_px,
+            )
+            && image.width > 0
+            && image.height > 0
+            && let Some(alloc) = self.atlas.allocate(image.width, image.height)
+        {
+            let rect = alloc.rectangle;
+            let atlas_x = rect.min.x as u32;
+            let atlas_y = rect.min.y as u32;
+            if image.is_color {
+                self.atlas
+                    .blit_rgba(atlas_x, atlas_y, image.width, image.height, &image.data);
+            } else {
+                self.atlas
+                    .blit_mask(atlas_x, atlas_y, image.width, image.height, &image.data);
+            }
+            self.glyph_cache.insert(
+                cache_key,
+                crate::atlas::cache::CachedGlyph {
+                    alloc_id: alloc.id,
+                    atlas_x,
+                    atlas_y,
+                    width: image.width,
+                    height: image.height,
+                    placement_left: image.placement_left,
+                    placement_top: image.placement_top,
+                    is_color: image.is_color,
+                    last_used: 0,
+                },
+            );
+        }
+
+        if let Some(cached) = self.glyph_cache.get(&cache_key) {
+            let screen_x = pen_x + glyph.x_offset + cached.placement_left as f32;
+            let screen_y = baseline - glyph.y_offset - cached.placement_top as f32;
+            let color = if cached.is_color {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                text_color
+            };
+            quads.push(GlyphQuad {
+                screen: [
+                    screen_x,
+                    screen_y,
+                    cached.width as f32,
+                    cached.height as f32,
+                ],
+                atlas: [
+                    cached.atlas_x as f32,
+                    cached.atlas_y as f32,
+                    cached.width as f32,
+                    cached.height as f32,
+                ],
+                color,
+            });
         }
     }
 
