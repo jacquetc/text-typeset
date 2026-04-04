@@ -625,13 +625,18 @@ impl Typesetter {
     /// When `glyphs_evicted` is true, callers that cache glyph output
     /// (e.g. paint caches) must invalidate — evicted atlas space may be
     /// reused by future glyph allocations.
-    pub fn atlas_snapshot(&mut self) -> (bool, u32, u32, &[u8], bool) {
-        // Advance generation so eviction thresholds work correctly.
-        self.glyph_cache.advance_generation();
-        let evicted = self.glyph_cache.evict_unused();
-        let glyphs_evicted = !evicted.is_empty();
-        for alloc_id in evicted {
-            self.atlas.deallocate(alloc_id);
+    pub fn atlas_snapshot(&mut self, advance_generation: bool) -> (bool, u32, u32, &[u8], bool) {
+        // Only advance generation and run eviction when text work happened.
+        // Skipping this on idle frames prevents aging out glyphs that are
+        // still visible but not re-measured (paint cache reuse scenario).
+        let mut glyphs_evicted = false;
+        if advance_generation {
+            self.glyph_cache.advance_generation();
+            let evicted = self.glyph_cache.evict_unused();
+            glyphs_evicted = !evicted.is_empty();
+            for alloc_id in evicted {
+                self.atlas.deallocate(alloc_id);
+            }
         }
 
         let dirty = self.atlas.dirty;
