@@ -617,6 +617,33 @@ impl Typesetter {
         }
     }
 
+    /// Read the glyph atlas state without triggering the full document
+    /// render pipeline. Advances the cache generation and runs eviction
+    /// (to reclaim atlas space), but does NOT re-render document content.
+    ///
+    /// Returns `(dirty, width, height, pixels, glyphs_evicted)`.
+    /// When `glyphs_evicted` is true, callers that cache glyph output
+    /// (e.g. paint caches) must invalidate — evicted atlas space may be
+    /// reused by future glyph allocations.
+    pub fn atlas_snapshot(&mut self) -> (bool, u32, u32, &[u8], bool) {
+        // Advance generation so eviction thresholds work correctly.
+        self.glyph_cache.advance_generation();
+        let evicted = self.glyph_cache.evict_unused();
+        let glyphs_evicted = !evicted.is_empty();
+        for alloc_id in evicted {
+            self.atlas.deallocate(alloc_id);
+        }
+
+        let dirty = self.atlas.dirty;
+        let w = self.atlas.width;
+        let h = self.atlas.height;
+        let pixels = &self.atlas.pixels[..];
+        if dirty {
+            self.atlas.dirty = false;
+        }
+        (dirty, w, h, pixels, glyphs_evicted)
+    }
+
     // ── Single-line layout ───────────────────────────────────────
 
     /// Lay out a single line of text and return GPU-ready glyph quads.
