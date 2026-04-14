@@ -105,10 +105,14 @@ pub struct FragmentParams {
 }
 
 /// Lay out a single block: resolve fonts, shape fragments, break into lines.
+///
+/// `scale_factor` is the device pixel ratio. Layout output is always in
+/// logical pixels; the scale factor affects shaping/rasterization precision.
 pub fn layout_block(
     registry: &FontRegistry,
     params: &BlockLayoutParams,
     available_width: f32,
+    scale_factor: f32,
 ) -> BlockLayout {
     let effective_left_margin = params.left_margin + params.list_indent;
     let content_width = (available_width - effective_left_margin - params.right_margin).max(0.0);
@@ -169,6 +173,7 @@ pub fn layout_block(
             frag.font_bold,
             frag.font_italic,
             font_point_size,
+            scale_factor,
         );
 
         if let Some(resolved) = resolved {
@@ -205,7 +210,7 @@ pub fn layout_block(
     }
 
     // Fallback metrics if no fragments resolved
-    let metrics = default_metrics.unwrap_or_else(|| get_default_metrics(registry));
+    let metrics = default_metrics.unwrap_or_else(|| get_default_metrics(registry, scale_factor));
 
     // Non-breakable lines: use infinite width to prevent wrapping
     let wrap_width = if params.non_breakable_lines {
@@ -242,9 +247,9 @@ pub fn layout_block(
 
     // Shape list marker or checkbox marker
     let list_marker = if params.checkbox.is_some() {
-        shape_checkbox_marker(registry, &metrics, params)
+        shape_checkbox_marker(registry, &metrics, params, scale_factor)
     } else if !params.list_marker.is_empty() {
-        shape_list_marker(registry, &metrics, params)
+        shape_list_marker(registry, &metrics, params, scale_factor)
     } else {
         None
     };
@@ -291,9 +296,10 @@ fn shape_list_marker(
     registry: &FontRegistry,
     _metrics: &FontMetricsPx,
     params: &BlockLayoutParams,
+    scale_factor: f32,
 ) -> Option<ShapedListMarker> {
     // Use the default font for the marker
-    let resolved = resolve_font(registry, None, None, None, None, None)?;
+    let resolved = resolve_font(registry, None, None, None, None, None, scale_factor)?;
     let run = shape_text(registry, &resolved, &params.list_marker, 0)?;
 
     // Position the marker: right-aligned within the indent area, with a small gap
@@ -348,11 +354,12 @@ fn shape_checkbox_marker(
     registry: &FontRegistry,
     _metrics: &FontMetricsPx,
     params: &BlockLayoutParams,
+    scale_factor: f32,
 ) -> Option<ShapedListMarker> {
     let checked = params.checkbox?;
     let marker_text = if checked { "\u{2611}" } else { "\u{2610}" }; // ballot box with/without check
 
-    let resolved = resolve_font(registry, None, None, None, None, None)?;
+    let resolved = resolve_font(registry, None, None, None, None, None, scale_factor)?;
     let run = shape_text(registry, &resolved, marker_text, 0)?;
 
     // If the font doesn't have the ballot box characters, use ASCII fallback
@@ -370,7 +377,7 @@ fn shape_checkbox_marker(
     Some(ShapedListMarker { run, x: marker_x })
 }
 
-fn get_default_metrics(registry: &FontRegistry) -> FontMetricsPx {
+fn get_default_metrics(registry: &FontRegistry, scale_factor: f32) -> FontMetricsPx {
     if let Some(default_id) = registry.default_font() {
         let resolved = ResolvedFont {
             font_face_id: default_id,
@@ -380,6 +387,7 @@ fn get_default_metrics(registry: &FontRegistry) -> FontMetricsPx {
                 .get(default_id)
                 .map(|e| e.swash_cache_key)
                 .unwrap_or_default(),
+            scale_factor,
         };
         if let Some(m) = font_metrics_px(registry, &resolved) {
             return m;

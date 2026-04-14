@@ -136,7 +136,7 @@ mod rasterizer {
     #[test]
     fn rasterize_letter_a_produces_image() {
         let ts = make_typesetter();
-        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
+        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None, 1.0).unwrap();
         let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
 
         // Shape 'A' to get its glyph ID
@@ -163,7 +163,7 @@ mod rasterizer {
     #[test]
     fn rasterized_glyph_has_nonzero_pixels() {
         let ts = make_typesetter();
-        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
+        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None, 1.0).unwrap();
         let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
 
         let run = shape_text(ts.font_registry(), &resolved, "A", 0).unwrap();
@@ -192,9 +192,9 @@ mod rasterizer {
     fn larger_size_produces_larger_glyph() {
         let ts = make_typesetter();
         let resolved_small =
-            resolve_font(ts.font_registry(), None, None, None, None, Some(12)).unwrap();
+            resolve_font(ts.font_registry(), None, None, None, None, Some(12), 1.0).unwrap();
         let _resolved_large =
-            resolve_font(ts.font_registry(), None, None, None, None, Some(48)).unwrap();
+            resolve_font(ts.font_registry(), None, None, None, None, Some(48), 1.0).unwrap();
         let entry = ts.font_registry().get(resolved_small.font_face_id).unwrap();
 
         let run = shape_text(ts.font_registry(), &resolved_small, "M", 0).unwrap();
@@ -233,7 +233,7 @@ mod rasterizer {
     #[test]
     fn space_glyph_rasterizes_to_empty_or_none() {
         let ts = make_typesetter();
-        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None).unwrap();
+        let resolved = resolve_font(ts.font_registry(), None, None, None, None, None, 1.0).unwrap();
         let entry = ts.font_registry().get(resolved.font_face_id).unwrap();
 
         let run = shape_text(ts.font_registry(), &resolved, " ", 0).unwrap();

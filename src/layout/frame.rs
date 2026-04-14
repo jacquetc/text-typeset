@@ -83,6 +83,7 @@ pub fn layout_frame(
     registry: &FontRegistry,
     params: &FrameLayoutParams,
     available_width: f32,
+    scale_factor: f32,
 ) -> FrameLayout {
     let border = params.border_width;
     let pad = params.padding;
@@ -96,7 +97,7 @@ pub fn layout_frame(
     let mut content_y = 0.0f32;
 
     for block_params in &params.blocks {
-        let mut block = layout_block(registry, block_params, content_width);
+        let mut block = layout_block(registry, block_params, content_width, scale_factor);
         block.y = content_y + block.top_margin;
         let block_content = block.height - block.top_margin - block.bottom_margin;
         content_y = block.y + block_content + block.bottom_margin;
@@ -106,7 +107,7 @@ pub fn layout_frame(
     // Lay out nested tables
     let mut tables = Vec::new();
     for (_flow_idx, table_params) in &params.tables {
-        let mut table = layout_table(registry, table_params, content_width);
+        let mut table = layout_table(registry, table_params, content_width, scale_factor);
         table.y = content_y;
         content_y += table.total_height;
         tables.push(table);
@@ -115,7 +116,7 @@ pub fn layout_frame(
     // Lay out nested frames (recursive)
     let mut nested_frames = Vec::new();
     for (_flow_idx, frame_params) in &params.frames {
-        let mut nested = layout_frame(registry, frame_params, content_width);
+        let mut nested = layout_frame(registry, frame_params, content_width, scale_factor);
         nested.y = content_y;
         nested.x = 0.0;
         content_y += nested.total_height;

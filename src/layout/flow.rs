@@ -32,6 +32,10 @@ pub struct FlowLayout {
     pub viewport_width: f32,
     pub viewport_height: f32,
     pub cached_max_content_width: f32,
+    /// Device pixel ratio passed to shapers and rasterizers.
+    /// Layout is always stored in logical pixels; this only affects
+    /// precision (physical ppem) and glyph bitmap resolution.
+    pub scale_factor: f32,
 }
 
 impl Default for FlowLayout {
@@ -51,6 +55,7 @@ impl FlowLayout {
             viewport_width: 0.0,
             viewport_height: 0.0,
             cached_max_content_width: 0.0,
+            scale_factor: 1.0,
         }
     }
 
@@ -61,7 +66,7 @@ impl FlowLayout {
         params: &TableLayoutParams,
         available_width: f32,
     ) {
-        let mut table = layout_table(registry, params, available_width);
+        let mut table = layout_table(registry, params, available_width, self.scale_factor);
 
         let mut y = self.content_height;
         table.y = y;
@@ -95,7 +100,7 @@ impl FlowLayout {
     ) {
         use crate::layout::frame::FramePosition;
 
-        let mut frame = layout_frame(registry, params, available_width);
+        let mut frame = layout_frame(registry, params, available_width, self.scale_factor);
 
         match params.position {
             FramePosition::Inline => {
@@ -154,7 +159,7 @@ impl FlowLayout {
         params: &BlockLayoutParams,
         available_width: f32,
     ) {
-        let mut block = layout_block(registry, params, available_width);
+        let mut block = layout_block(registry, params, available_width, self.scale_factor);
 
         // Margin collapsing with previous block
         let mut y = self.content_height;
@@ -271,7 +276,7 @@ impl FlowLayout {
         let old_content = old_height - old_top_margin - old_bottom_margin;
         let old_end = old_y + old_content + old_bottom_margin;
 
-        let mut block = layout_block(registry, params, available_width);
+        let mut block = layout_block(registry, params, available_width, self.scale_factor);
         block.y = old_y;
 
         if (block.top_margin - old_top_margin).abs() > 0.001 {
@@ -340,7 +345,7 @@ impl FlowLayout {
             None => return,
         };
 
-        let new_block = layout_block(registry, params, cell_width);
+        let new_block = layout_block(registry, params, cell_width, self.scale_factor);
         if let Some(old) = cell
             .blocks
             .iter_mut()
@@ -430,7 +435,7 @@ impl FlowLayout {
         };
 
         let old_total_height = frame.total_height;
-        let new_block = layout_block(registry, params, frame.content_width);
+        let new_block = layout_block(registry, params, frame.content_width, self.scale_factor);
 
         relayout_block_in_frame(frame, params.block_id, new_block);
 

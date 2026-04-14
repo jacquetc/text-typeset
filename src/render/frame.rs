@@ -29,6 +29,7 @@ pub fn build_render_frame(
     text_color: [f32; 4],
     render_frame: &mut RenderFrame,
 ) {
+    let scale_factor = flow.scale_factor;
     render_frame.glyphs.clear();
     render_frame.images.clear();
     render_frame.decorations.clear();
@@ -78,6 +79,7 @@ pub fn build_render_frame(
                         scroll_offset,
                         viewport_height,
                         text_color,
+                        scale_factor,
                         render_frame,
                     );
                     let table_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
@@ -112,6 +114,7 @@ pub fn build_render_frame(
                         scroll_offset,
                         viewport_height,
                         text_color,
+                        scale_factor,
                         render_frame,
                     );
                     let frame_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
@@ -143,6 +146,7 @@ pub fn build_render_frame(
                 scroll_offset,
                 viewport_height,
                 text_color,
+                scale_factor,
                 render_frame,
             );
             let block_g: Vec<GlyphQuad> = render_frame.glyphs[g_start..].to_vec();
@@ -159,6 +163,7 @@ pub fn build_render_frame(
                 0.0,
                 viewport_width,
                 text_color,
+                scale_factor,
             );
             render_frame
                 .block_decorations
@@ -209,6 +214,7 @@ pub(crate) fn render_block_at_offset(
     scroll_offset: f32,
     viewport_height: f32,
     default_text_color: [f32; 4],
+    scale_factor: f32,
     render_frame: &mut RenderFrame,
 ) {
     // Render list marker on the first line (if present)
@@ -228,6 +234,7 @@ pub(crate) fn render_block_at_offset(
                 scale_context,
                 scroll_offset,
                 default_text_color,
+                scale_factor,
                 render_frame,
             );
         }
@@ -279,6 +286,7 @@ pub(crate) fn render_block_at_offset(
                 scale_context,
                 scroll_offset,
                 default_text_color,
+                scale_factor,
                 render_frame,
             );
         }
@@ -301,6 +309,7 @@ fn render_table_cells(
     scroll_offset: f32,
     viewport_height: f32,
     default_text_color: [f32; 4],
+    scale_factor: f32,
     render_frame: &mut RenderFrame,
 ) {
     for cell in &table.cell_layouts {
@@ -322,6 +331,7 @@ fn render_table_cells(
                 scroll_offset,
                 viewport_height,
                 default_text_color,
+                scale_factor,
                 render_frame,
             );
             let cell_w = table
@@ -338,6 +348,7 @@ fn render_table_cells(
                 cell_y,
                 cell_w,
                 default_text_color,
+                scale_factor,
             );
             render_frame.decorations.extend(decos);
         }
@@ -354,6 +365,7 @@ fn render_frame_layout(
     scroll_offset: f32,
     viewport_height: f32,
     default_text_color: [f32; 4],
+    scale_factor: f32,
     render_frame: &mut RenderFrame,
 ) {
     let offset_x = frame.x + frame.content_x;
@@ -372,6 +384,7 @@ fn render_frame_layout(
             scroll_offset,
             viewport_height,
             default_text_color,
+            scale_factor,
             render_frame,
         );
         let decos = generate_block_decorations(
@@ -383,6 +396,7 @@ fn render_frame_layout(
             offset_y,
             frame.content_width,
             default_text_color,
+            scale_factor,
         );
         render_frame.decorations.extend(decos);
     }
@@ -400,6 +414,7 @@ fn render_frame_layout(
             scroll_offset,
             viewport_height,
             default_text_color,
+            scale_factor,
             render_frame,
         );
     }
@@ -419,6 +434,7 @@ fn render_frame_layout(
             scroll_offset,
             viewport_height,
             default_text_color,
+            scale_factor,
             render_frame,
         );
     }
@@ -502,6 +518,7 @@ fn render_nested_frame(
     scroll_offset: f32,
     viewport_height: f32,
     default_text_color: [f32; 4],
+    scale_factor: f32,
     render_frame: &mut RenderFrame,
 ) {
     let frame_x = parent_x + nested.x;
@@ -522,6 +539,7 @@ fn render_nested_frame(
             scroll_offset,
             viewport_height,
             default_text_color,
+            scale_factor,
             render_frame,
         );
         let decos = generate_block_decorations(
@@ -533,6 +551,7 @@ fn render_nested_frame(
             content_y,
             nested.content_width,
             default_text_color,
+            scale_factor,
         );
         render_frame.decorations.extend(decos);
     }
@@ -550,6 +569,7 @@ fn render_nested_frame(
             scroll_offset,
             viewport_height,
             default_text_color,
+            scale_factor,
             render_frame,
         );
     }
@@ -567,6 +587,7 @@ fn render_nested_frame(
             scroll_offset,
             viewport_height,
             default_text_color,
+            scale_factor,
             render_frame,
         );
     }
@@ -607,8 +628,15 @@ fn render_run_glyphs(
     scale_context: &mut swash::scale::ScaleContext,
     scroll_offset: f32,
     default_text_color: [f32; 4],
+    scale_factor: f32,
     render_frame: &mut RenderFrame,
 ) {
+    // Rasterize at physical ppem; the cache key uses the physical size so
+    // different scale_factors never collide.
+    let sf = scale_factor.max(f32::MIN_POSITIVE);
+    let inv_sf = 1.0 / sf;
+    let physical_size_px = run.size_px * sf;
+
     let mut pen_x = start_x;
     for glyph in &run.glyphs {
         if glyph.glyph_id == 0 {
@@ -625,7 +653,7 @@ fn render_run_glyphs(
             }
         };
 
-        let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, run.size_px);
+        let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, physical_size_px);
         ensure_glyph_cached(
             &cache_key,
             cache,
@@ -634,24 +662,25 @@ fn render_run_glyphs(
             &entry.data,
             entry.face_index,
             entry.swash_cache_key,
-            run.size_px,
+            physical_size_px,
         );
         if let Some(cached) = cache.get(&cache_key) {
-            let screen_x = pen_x + glyph.x_offset + cached.placement_left as f32;
-            let screen_y =
-                baseline_y - glyph.y_offset - cached.placement_top as f32 - scroll_offset;
+            // CachedGlyph stores physical dims; convert to logical for the
+            // quad's screen rect. The atlas rect stays physical (it's the
+            // actual texture sub-region).
+            let logical_w = cached.width as f32 * inv_sf;
+            let logical_h = cached.height as f32 * inv_sf;
+            let logical_left = cached.placement_left as f32 * inv_sf;
+            let logical_top = cached.placement_top as f32 * inv_sf;
+            let screen_x = pen_x + glyph.x_offset + logical_left;
+            let screen_y = baseline_y - glyph.y_offset - logical_top - scroll_offset;
             let color = if cached.is_color {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
                 run.foreground_color.unwrap_or(default_text_color)
             };
             render_frame.glyphs.push(GlyphQuad {
-                screen: [
-                    screen_x,
-                    screen_y,
-                    cached.width as f32,
-                    cached.height as f32,
-                ],
+                screen: [screen_x, screen_y, logical_w, logical_h],
                 atlas: [
                     cached.atlas_x as f32,
                     cached.atlas_y as f32,

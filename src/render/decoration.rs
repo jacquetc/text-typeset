@@ -16,6 +16,7 @@ pub fn generate_block_decorations(
     y_offset: f32,
     available_width: f32,
     default_text_color: [f32; 4],
+    scale_factor: f32,
 ) -> Vec<DecorationRect> {
     let mut decorations = Vec::new();
 
@@ -64,7 +65,7 @@ pub fn generate_block_decorations(
             }
 
             // Get font metrics for decoration positioning
-            let metrics = get_run_metrics(registry, run.font_face_id, run.size_px);
+            let metrics = get_run_metrics(registry, run.font_face_id, run.size_px, scale_factor);
 
             let run_x = x_offset + block.left_margin + positioned_run.x;
             let run_width = run.advance_width;
@@ -115,6 +116,7 @@ fn get_run_metrics(
     registry: &FontRegistry,
     font_face_id: crate::types::FontFaceId,
     size_px: f32,
+    scale_factor: f32,
 ) -> FontMetricsPx {
     let entry = match registry.get(font_face_id) {
         Some(e) => e,
@@ -125,6 +127,7 @@ fn get_run_metrics(
         size_px,
         face_index: entry.face_index,
         swash_cache_key: entry.swash_cache_key,
+        scale_factor,
     };
     font_metrics_px(registry, &resolved).unwrap_or_else(fallback_metrics)
 }

@@ -7,6 +7,11 @@ pub struct ResolvedFont {
     pub size_px: f32,
     pub face_index: u32,
     pub swash_cache_key: swash::CacheKey,
+    /// Device pixel ratio applied during shaping and rasterization.
+    /// Shaping happens at `size_px * scale_factor` and results are
+    /// divided by `scale_factor` to produce logical-pixel metrics,
+    /// so downstream layout stays in logical space.
+    pub scale_factor: f32,
 }
 
 /// Resolve a font from text formatting parameters.
@@ -23,6 +28,7 @@ pub fn resolve_font(
     font_bold: Option<bool>,
     font_italic: Option<bool>,
     font_point_size: Option<u32>,
+    scale_factor: f32,
 ) -> Option<ResolvedFont> {
     let weight = resolve_weight(font_weight, font_bold);
     let italic = font_italic.unwrap_or(false);
@@ -40,6 +46,7 @@ pub fn resolve_font(
             size_px,
             face_index: entry.face_index,
             swash_cache_key: entry.swash_cache_key,
+            scale_factor,
         });
     }
 
@@ -55,6 +62,7 @@ pub fn resolve_font(
             size_px,
             face_index: variant_entry.face_index,
             swash_cache_key: variant_entry.swash_cache_key,
+            scale_factor,
         });
     }
     let entry = registry.get(default_id)?;
@@ -63,6 +71,7 @@ pub fn resolve_font(
         size_px,
         face_index: entry.face_index,
         swash_cache_key: entry.swash_cache_key,
+        scale_factor,
     })
 }
 

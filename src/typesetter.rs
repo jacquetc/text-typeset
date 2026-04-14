@@ -62,6 +62,7 @@ pub struct Typesetter {
     cursors: Vec<CursorDisplay>,
     zoom: f32,
     rendered_zoom: f32,
+    scale_factor: f32,
 }
 
 impl Typesetter {
@@ -88,6 +89,7 @@ impl Typesetter {
             cursors: Vec::new(),
             zoom: 1.0,
             rendered_zoom: f32::NAN,
+            scale_factor: 1.0,
         }
     }
 
@@ -248,6 +250,51 @@ impl Typesetter {
     /// The current display zoom level (default 1.0).
     pub fn zoom(&self) -> f32 {
         self.zoom
+    }
+
+    // ── Scale factor (HiDPI) ────────────────────────────────────
+
+    /// Set the device pixel ratio for HiDPI rasterization.
+    ///
+    /// Layout stays in logical pixels, but glyphs are shaped and rasterized
+    /// at `size_px * scale_factor` so text is sharp on HiDPI displays.
+    /// This is orthogonal to [`set_zoom`](Self::set_zoom), which is a pure
+    /// display transform applied after rendering.
+    ///
+    /// Changing this value invalidates cached layout and cached glyphs:
+    /// the flow layout is cleared, the glyph cache is emptied, and the
+    /// atlas is reset. After calling this, re-run `layout_blocks` /
+    /// `layout_full` and then `render()`.
+    ///
+    /// Clamped to `0.25..=8.0`. Default is `1.0`.
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        let sf = scale_factor.clamp(0.25, 8.0);
+        if (self.scale_factor - sf).abs() <= f32::EPSILON {
+            return;
+        }
+        self.scale_factor = sf;
+        self.flow_layout.scale_factor = sf;
+        // Shaped advances and line metrics depended on the previous scale
+        // factor's ppem rounding; drop everything.
+        self.flow_layout.clear();
+        // Evict every cached glyph: rasters were produced at the old
+        // physical size and would be wrong at the new one.
+        self.glyph_cache.entries.clear();
+        // The atlas allocator still holds rects for glyphs we just
+        // evicted. Start from a fresh allocator to reclaim the space.
+        self.atlas = GlyphAtlas::new();
+        // Force the next incremental render path (`render_block_only` /
+        // `render_cursor_only`) to fall back to a full `render()`, since
+        // the per-block glyph caches in `render_frame` reference the
+        // now-discarded atlas. A sentinel outside the clamp range works;
+        // NaN would not (NaN comparisons always return false).
+        self.rendered_zoom = -1.0;
+        self.rendered_scroll_offset = -1.0e30;
+    }
+
+    /// The current scale factor (device pixel ratio). Default is `1.0`.
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     // ── Layout ──────────────────────────────────────────────────
@@ -451,6 +498,7 @@ impl Typesetter {
                 self.scroll_offset,
                 effective_vh,
                 self.text_color,
+                self.scale_factor,
                 &mut tmp,
             );
             new_glyphs = tmp.glyphs;
@@ -468,6 +516,7 @@ impl Typesetter {
                 0.0,
                 effective_vw,
                 self.text_color,
+                self.scale_factor,
             )
         } else {
             Vec::new()
@@ -700,6 +749,7 @@ impl Typesetter {
             format.font_bold,
             format.font_italic,
             font_point_size,
+            self.scale_factor,
         ) {
             Some(r) => r,
             None => return empty,
@@ -830,7 +880,10 @@ impl Typesetter {
             None => return,
         };
 
-        let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, run.size_px);
+        let sf = self.scale_factor.max(f32::MIN_POSITIVE);
+        let inv_sf = 1.0 / sf;
+        let physical_size_px = run.size_px * sf;
+        let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, physical_size_px);
 
         // Ensure glyph is cached (rasterize on miss)
         if self.glyph_cache.peek(&cache_key).is_none()
@@ -840,7 +893,7 @@ impl Typesetter {
                 entry.face_index,
                 entry.swash_cache_key,
                 glyph.glyph_id,
-                run.size_px,
+                physical_size_px,
             )
             && image.width > 0
             && image.height > 0
@@ -873,20 +926,20 @@ impl Typesetter {
         }
 
         if let Some(cached) = self.glyph_cache.get(&cache_key) {
-            let screen_x = pen_x + glyph.x_offset + cached.placement_left as f32;
-            let screen_y = baseline - glyph.y_offset - cached.placement_top as f32;
+            // CachedGlyph dims are physical; quad screen rect is logical.
+            let logical_w = cached.width as f32 * inv_sf;
+            let logical_h = cached.height as f32 * inv_sf;
+            let logical_left = cached.placement_left as f32 * inv_sf;
+            let logical_top = cached.placement_top as f32 * inv_sf;
+            let screen_x = pen_x + glyph.x_offset + logical_left;
+            let screen_y = baseline - glyph.y_offset - logical_top;
             let color = if cached.is_color {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
                 text_color
             };
             quads.push(GlyphQuad {
-                screen: [
-                    screen_x,
-                    screen_y,
-                    cached.width as f32,
-                    cached.height as f32,
-                ],
+                screen: [screen_x, screen_y, logical_w, logical_h],
                 atlas: [
                     cached.atlas_x as f32,
                     cached.atlas_y as f32,

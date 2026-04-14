@@ -100,6 +100,7 @@ fn apply_glyph_fallback(
             size_px: primary.size_px,
             face_index: fallback_entry.face_index,
             swash_cache_key: fallback_entry.swash_cache_key,
+            scale_factor: primary.scale_factor,
         };
 
         let char_str = &text[byte_offset..byte_offset + ch.len_utf8()];
@@ -141,7 +142,12 @@ pub fn shape_text_directed(
     if units_per_em == 0.0 {
         return None;
     }
-    let scale = resolved.size_px / units_per_em;
+    // Shape at physical ppem, then divide results by scale_factor so
+    // downstream layout stays in logical pixels. See ResolvedFont.
+    let sf = resolved.scale_factor.max(f32::MIN_POSITIVE);
+    let physical_size = resolved.size_px * sf;
+    let physical_scale = physical_size / units_per_em;
+    let inv_sf = 1.0 / sf;
 
     let mut buffer = UnicodeBuffer::new();
     buffer.push_str(text);
@@ -160,10 +166,10 @@ pub fn shape_text_directed(
     let mut total_advance = 0.0f32;
 
     for (info, pos) in infos.iter().zip(positions.iter()) {
-        let x_advance = pos.x_advance as f32 * scale;
-        let y_advance = pos.y_advance as f32 * scale;
-        let x_offset = pos.x_offset as f32 * scale;
-        let y_offset = pos.y_offset as f32 * scale;
+        let x_advance = pos.x_advance as f32 * physical_scale * inv_sf;
+        let y_advance = pos.y_advance as f32 * physical_scale * inv_sf;
+        let x_offset = pos.x_offset as f32 * physical_scale * inv_sf;
+        let y_offset = pos.y_offset as f32 * physical_scale * inv_sf;
 
         glyphs.push(ShapedGlyph {
             glyph_id: info.glyph_id as u16,
@@ -214,7 +220,10 @@ pub fn shape_text_with_buffer(
     if units_per_em == 0.0 {
         return None;
     }
-    let scale = resolved.size_px / units_per_em;
+    let sf = resolved.scale_factor.max(f32::MIN_POSITIVE);
+    let physical_size = resolved.size_px * sf;
+    let physical_scale = physical_size / units_per_em;
+    let inv_sf = 1.0 / sf;
 
     let mut buffer = buffer;
     buffer.push_str(text);
@@ -228,10 +237,10 @@ pub fn shape_text_with_buffer(
     let mut total_advance = 0.0f32;
 
     for (info, pos) in infos.iter().zip(positions.iter()) {
-        let x_advance = pos.x_advance as f32 * scale;
-        let y_advance = pos.y_advance as f32 * scale;
-        let x_offset = pos.x_offset as f32 * scale;
-        let y_offset = pos.y_offset as f32 * scale;
+        let x_advance = pos.x_advance as f32 * physical_scale * inv_sf;
+        let y_advance = pos.y_advance as f32 * physical_scale * inv_sf;
+        let x_offset = pos.x_offset as f32 * physical_scale * inv_sf;
+        let y_offset = pos.y_offset as f32 * physical_scale * inv_sf;
 
         glyphs.push(ShapedGlyph {
             glyph_id: info.glyph_id as u16,
@@ -271,19 +280,25 @@ pub fn shape_text_with_buffer(
     Some((run, recycled))
 }
 
-/// Get font metrics (ascent, descent, leading) scaled to pixels.
+/// Get font metrics (ascent, descent, leading) scaled to logical pixels.
+///
+/// Scales at `size_px * scale_factor` (physical) and divides by
+/// `scale_factor`, so callers always see logical-pixel metrics.
 pub fn font_metrics_px(registry: &FontRegistry, resolved: &ResolvedFont) -> Option<FontMetricsPx> {
     let entry = registry.get(resolved.font_face_id)?;
     let font_ref = swash::FontRef::from_index(&entry.data, entry.face_index as usize)?;
-    let metrics = font_ref.metrics(&[]).scale(resolved.size_px);
+    let sf = resolved.scale_factor.max(f32::MIN_POSITIVE);
+    let physical_size = resolved.size_px * sf;
+    let metrics = font_ref.metrics(&[]).scale(physical_size);
+    let inv_sf = 1.0 / sf;
 
     Some(FontMetricsPx {
-        ascent: metrics.ascent,
-        descent: metrics.descent,
-        leading: metrics.leading,
-        underline_offset: metrics.underline_offset,
-        strikeout_offset: metrics.strikeout_offset,
-        stroke_size: metrics.stroke_size,
+        ascent: metrics.ascent * inv_sf,
+        descent: metrics.descent * inv_sf,
+        leading: metrics.leading * inv_sf,
+        underline_offset: metrics.underline_offset * inv_sf,
+        strikeout_offset: metrics.strikeout_offset * inv_sf,
+        stroke_size: metrics.stroke_size * inv_sf,
     })
 }
 
