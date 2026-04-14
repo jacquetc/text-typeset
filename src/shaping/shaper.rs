@@ -31,7 +31,22 @@ pub fn shape_text(
     text: &str,
     text_offset: usize,
 ) -> Option<ShapedRun> {
-    let mut run = shape_text_directed(registry, resolved, text, text_offset, TextDirection::Auto)?;
+    shape_text_with_fallback(registry, resolved, text, text_offset, TextDirection::Auto)
+}
+
+/// Shape text with an explicit direction and glyph fallback.
+///
+/// Like `shape_text`, but caller supplies the direction instead of letting
+/// rustybuzz guess. Used by the bidi-aware layout path, which splits text
+/// into directional runs before shaping.
+pub fn shape_text_with_fallback(
+    registry: &FontRegistry,
+    resolved: &ResolvedFont,
+    text: &str,
+    text_offset: usize,
+    direction: TextDirection,
+) -> Option<ShapedRun> {
+    let mut run = shape_text_directed(registry, resolved, text, text_offset, direction)?;
 
     // Check for .notdef glyphs and attempt fallback
     if run.glyphs.iter().any(|g| g.glyph_id == 0) && !text.is_empty() {
@@ -280,74 +295,40 @@ pub struct BidiRun {
     pub visual_order: usize,
 }
 
-/// Analyze text for bidirectional content and return directional runs.
-/// If the text is purely LTR, returns a single run.
+/// Analyze text for bidirectional content and return directional runs
+/// in **visual order** per UAX #9 (Unicode Bidirectional Algorithm, rule L2).
+///
+/// The returned runs can be shaped independently and concatenated left-to-right
+/// to produce correctly-ordered mixed-script text (e.g. Latin embedded in
+/// Arabic). For pure-LTR text, returns a single LTR run. For pure-RTL text,
+/// returns a single RTL run.
 pub fn bidi_runs(text: &str) -> Vec<BidiRun> {
     use unicode_bidi::BidiInfo;
 
     if text.is_empty() {
-        return vec![BidiRun {
-            byte_range: 0..0,
-            direction: TextDirection::LeftToRight,
-            visual_order: 0,
-        }];
+        return Vec::new();
     }
 
     let bidi_info = BidiInfo::new(text, None);
-
     let mut runs = Vec::new();
 
     for para in &bidi_info.paragraphs {
-        let para_text = &text[para.range.clone()];
-        let para_offset = para.range.start;
-
-        // Get levels for this paragraph
-        let levels = &bidi_info.levels[para.range.clone()];
-
-        // Split into runs of same level
-        if levels.is_empty() {
-            continue;
-        }
-
-        let mut run_start = 0usize;
-        let mut current_level = levels[0];
-
-        for (i, &level) in levels.iter().enumerate() {
-            if level != current_level {
-                // Emit previous run
-                let dir = if current_level.is_rtl() {
-                    TextDirection::RightToLeft
-                } else {
-                    TextDirection::LeftToRight
-                };
-                // Snap to char boundaries
-                let start = snap_to_char_boundary(para_text, run_start);
-                let end = snap_to_char_boundary(para_text, i);
-                if start < end {
-                    runs.push(BidiRun {
-                        byte_range: (para_offset + start)..(para_offset + end),
-                        direction: dir,
-                        visual_order: runs.len(),
-                    });
-                }
-                run_start = i;
-                current_level = level;
+        let (levels, level_runs) = bidi_info.visual_runs(para, para.range.clone());
+        for level_run in level_runs {
+            if level_run.is_empty() {
+                continue;
             }
-        }
-
-        // Emit final run
-        let dir = if current_level.is_rtl() {
-            TextDirection::RightToLeft
-        } else {
-            TextDirection::LeftToRight
-        };
-        let start = snap_to_char_boundary(para_text, run_start);
-        let end = para_text.len();
-        if start < end {
+            let level = levels[level_run.start];
+            let direction = if level.is_rtl() {
+                TextDirection::RightToLeft
+            } else {
+                TextDirection::LeftToRight
+            };
+            let visual_order = runs.len();
             runs.push(BidiRun {
-                byte_range: (para_offset + start)..(para_offset + end),
-                direction: dir,
-                visual_order: runs.len(),
+                byte_range: level_run,
+                direction,
+                visual_order,
             });
         }
     }
@@ -361,18 +342,6 @@ pub fn bidi_runs(text: &str) -> Vec<BidiRun> {
     }
 
     runs
-}
-
-fn snap_to_char_boundary(text: &str, byte_pos: usize) -> usize {
-    if byte_pos >= text.len() {
-        return text.len();
-    }
-    // Walk forward to the next char boundary
-    let mut pos = byte_pos;
-    while pos < text.len() && !text.is_char_boundary(pos) {
-        pos += 1;
-    }
-    pos
 }
 
 pub struct FontMetricsPx {

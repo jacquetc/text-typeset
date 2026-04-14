@@ -676,7 +676,7 @@ impl Typesetter {
         max_width: Option<f32>,
     ) -> SingleLineResult {
         use crate::font::resolve::resolve_font;
-        use crate::shaping::shaper::{font_metrics_px, shape_text};
+        use crate::shaping::shaper::{bidi_runs, font_metrics_px, shape_text, shape_text_with_fallback};
 
         let empty = SingleLineResult {
             width: 0.0,
@@ -711,18 +711,42 @@ impl Typesetter {
         let line_height = metrics.ascent + metrics.descent + metrics.leading;
         let baseline = metrics.ascent;
 
-        // Shape the text
-        let run = match shape_text(&self.font_registry, &resolved, text, 0) {
-            Some(r) => r,
-            None => return empty,
-        };
+        // Shape the text, split into bidi runs in visual order.
+        //
+        // Each directional run is shaped with its own explicit direction
+        // so rustybuzz cannot infer RTL from a strong Arabic/Hebrew char
+        // and reverse an embedded Latin cluster (UAX #9, rule L2).
+        //
+        // Runs are already in visual order — concatenating their glyphs
+        // left-to-right produces the correct visual line.
+        let runs: Vec<_> = bidi_runs(text)
+            .into_iter()
+            .filter_map(|br| {
+                let slice = text.get(br.byte_range.clone())?;
+                shape_text_with_fallback(
+                    &self.font_registry,
+                    &resolved,
+                    slice,
+                    br.byte_range.start,
+                    br.direction,
+                )
+            })
+            .collect();
 
-        // Determine which glyphs to render (truncation with ellipsis if needed)
-        let (glyphs_to_render, final_width, ellipsis_run) =
+        if runs.is_empty() {
+            return empty;
+        }
+
+        let total_advance: f32 = runs.iter().map(|r| r.advance_width).sum();
+
+        // Determine which glyphs to render (truncation with ellipsis if needed).
+        // Truncation operates on the visual-order glyph stream and cuts from
+        // the visual-end (right side), matching the pre-bidi behavior for the
+        // common single-direction case.
+        let (truncate_at_visual_index, final_width, ellipsis_run) =
             if let Some(max_w) = max_width
-                && run.advance_width > max_w
+                && total_advance > max_w
             {
-                // Shape the ellipsis character
                 let ellipsis_run = shape_text(&self.font_registry, &resolved, "\u{2026}", 0);
                 let ellipsis_width = ellipsis_run
                     .as_ref()
@@ -730,37 +754,48 @@ impl Typesetter {
                     .unwrap_or(0.0);
                 let budget = (max_w - ellipsis_width).max(0.0);
 
-                // Find how many glyphs fit within budget
                 let mut used = 0.0f32;
-                let mut count = 0;
-                for g in &run.glyphs {
-                    if used + g.x_advance > budget {
-                        break;
+                let mut count = 0usize;
+                'outer: for run in &runs {
+                    for g in &run.glyphs {
+                        if used + g.x_advance > budget {
+                            break 'outer;
+                        }
+                        used += g.x_advance;
+                        count += 1;
                     }
-                    used += g.x_advance;
-                    count += 1;
                 }
 
-                (&run.glyphs[..count], used + ellipsis_width, ellipsis_run)
+                (Some(count), used + ellipsis_width, ellipsis_run)
             } else {
-                (&run.glyphs[..], run.advance_width, None)
+                (None, total_advance, None)
             };
 
-        // Rasterize glyphs and build GlyphQuads
+        // Rasterize glyphs in visual order and build GlyphQuads
         let text_color = format.color.unwrap_or(self.text_color);
-        let mut quads = Vec::with_capacity(glyphs_to_render.len() + 1);
+        let glyph_capacity: usize = runs.iter().map(|r| r.glyphs.len()).sum();
+        let mut quads = Vec::with_capacity(glyph_capacity + 1);
         let mut pen_x = 0.0f32;
+        let mut emitted = 0usize;
 
-        for glyph in glyphs_to_render {
-            self.rasterize_glyph_quad(
-                glyph,
-                &run,
-                pen_x,
-                baseline,
-                text_color,
-                &mut quads,
-            );
-            pen_x += glyph.x_advance;
+        'emit: for run in &runs {
+            for glyph in &run.glyphs {
+                if let Some(limit) = truncate_at_visual_index
+                    && emitted >= limit
+                {
+                    break 'emit;
+                }
+                self.rasterize_glyph_quad(
+                    glyph,
+                    run,
+                    pen_x,
+                    baseline,
+                    text_color,
+                    &mut quads,
+                );
+                pen_x += glyph.x_advance;
+                emitted += 1;
+            }
         }
 
         // Render ellipsis glyphs if truncated

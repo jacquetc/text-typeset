@@ -199,11 +199,13 @@ fn bidi_pure_ltr_produces_single_run() {
 }
 
 #[test]
-fn bidi_empty_text_produces_single_run() {
+fn bidi_empty_text_produces_no_runs() {
     use text_typeset::shaping::shaper::bidi_runs;
 
+    // Empty input has nothing to shape; the layout path early-exits on
+    // `text.is_empty()`, so an empty slice of runs is the honest answer.
     let runs = bidi_runs("");
-    assert_eq!(runs.len(), 1);
+    assert!(runs.is_empty());
 }
 
 #[test]
