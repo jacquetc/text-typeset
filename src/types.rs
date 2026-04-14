@@ -268,6 +268,29 @@ pub struct SingleLineResult {
     pub glyphs: Vec<GlyphQuad>,
 }
 
+/// Result of [`crate::Typesetter::layout_paragraph`].
+///
+/// Contains the measured dimensions and GPU-ready glyph quads for a
+/// multi-line paragraph wrapped at a fixed width. Glyphs are positioned
+/// in paragraph-local coordinates: `x = 0` is the left edge of the
+/// paragraph, `y = 0` is the top of the first line's line box. The
+/// adapter should offset all glyph quads by the paragraph's screen
+/// position before drawing.
+pub struct ParagraphResult {
+    /// Width of the widest laid-out line, in pixels. May be less than the
+    /// `max_width` passed to `layout_paragraph` if the content is narrower.
+    pub width: f32,
+    /// Total stacked paragraph height in pixels — sum of line heights for
+    /// all emitted lines.
+    pub height: f32,
+    /// Distance from `y = 0` to the baseline of the first line, in pixels.
+    pub baseline_first: f32,
+    /// Number of lines actually emitted (respects `max_lines` when set).
+    pub line_count: usize,
+    /// GPU-ready glyph quads in paragraph-local coordinates.
+    pub glyphs: Vec<GlyphQuad>,
+}
+
 impl RenderFrame {
     pub(crate) fn new() -> Self {
         Self {

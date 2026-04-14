@@ -4,8 +4,8 @@ use crate::atlas::rasterizer::rasterize_glyph;
 use crate::font::registry::FontRegistry;
 use crate::layout::flow::{FlowItem, FlowLayout};
 use crate::types::{
-    BlockVisualInfo, CursorDisplay, FontFaceId, GlyphQuad, HitTestResult, RenderFrame,
-    SingleLineResult, TextFormat,
+    BlockVisualInfo, CursorDisplay, FontFaceId, GlyphQuad, HitTestResult, ParagraphResult,
+    RenderFrame, SingleLineResult, TextFormat,
 };
 
 /// How the content (layout) width is determined.
@@ -854,6 +854,130 @@ impl Typesetter {
             width: final_width,
             height: line_height,
             baseline,
+            glyphs: quads,
+        }
+    }
+
+    /// Lay out a multi-line paragraph by wrapping text at `max_width`.
+    ///
+    /// This is the multi-line counterpart to [`layout_single_line`]. It shapes
+    /// the input text, breaks it into lines at unicode line-break opportunities
+    /// (greedy, left-aligned), and rasterizes each line's glyphs into
+    /// paragraph-local coordinates starting at `(0, 0)`.
+    ///
+    /// If `max_lines` is `Some(n)`, at most `n` lines are emitted — any
+    /// remaining lines are silently dropped. (A future extension may insert a
+    /// trailing ellipsis on the last emitted line; this is currently plain
+    /// truncation.)
+    ///
+    /// The caller is responsible for offsetting the returned glyph quads by
+    /// the paragraph's screen position.
+    ///
+    /// [`layout_single_line`]: Self::layout_single_line
+    pub fn layout_paragraph(
+        &mut self,
+        text: &str,
+        format: &TextFormat,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> ParagraphResult {
+        use crate::font::resolve::resolve_font;
+        use crate::layout::paragraph::{Alignment, break_into_lines};
+        use crate::shaping::shaper::{bidi_runs, font_metrics_px, shape_text_with_fallback};
+
+        let empty = ParagraphResult {
+            width: 0.0,
+            height: 0.0,
+            baseline_first: 0.0,
+            line_count: 0,
+            glyphs: Vec::new(),
+        };
+
+        if text.is_empty() || max_width <= 0.0 {
+            return empty;
+        }
+
+        // Resolve font and metrics (identical to layout_single_line's prelude).
+        let font_point_size = format.font_size.map(|s| s as u32);
+        let resolved = match resolve_font(
+            &self.font_registry,
+            format.font_family.as_deref(),
+            format.font_weight,
+            format.font_bold,
+            format.font_italic,
+            font_point_size,
+            self.scale_factor,
+        ) {
+            Some(r) => r,
+            None => return empty,
+        };
+
+        let metrics = match font_metrics_px(&self.font_registry, &resolved) {
+            Some(m) => m,
+            None => return empty,
+        };
+
+        // Shape the text into bidi-aware runs in visual order.
+        let runs: Vec<_> = bidi_runs(text)
+            .into_iter()
+            .filter_map(|br| {
+                let slice = text.get(br.byte_range.clone())?;
+                shape_text_with_fallback(
+                    &self.font_registry,
+                    &resolved,
+                    slice,
+                    br.byte_range.start,
+                    br.direction,
+                )
+            })
+            .collect();
+
+        if runs.is_empty() {
+            return empty;
+        }
+
+        // Break into lines using the existing greedy wrapper.
+        let lines = break_into_lines(runs, text, max_width, Alignment::Left, 0.0, &metrics);
+
+        // Cap at max_lines.
+        let line_count = match max_lines {
+            Some(n) => lines.len().min(n),
+            None => lines.len(),
+        };
+
+        // Walk the emitted lines, stacking them vertically and rasterizing
+        // glyphs into paragraph-local coordinates.
+        let text_color = format.color.unwrap_or(self.text_color);
+        let mut quads: Vec<GlyphQuad> = Vec::new();
+        let mut y_top = 0.0f32;
+        let mut max_line_width = 0.0f32;
+        let baseline_first = metrics.ascent;
+
+        for line in lines.iter().take(line_count) {
+            if line.width > max_line_width {
+                max_line_width = line.width;
+            }
+            let baseline_y = y_top + metrics.ascent;
+            for run in &line.runs {
+                let mut pen_x = run.x;
+                // Snapshot the glyph list so `rasterize_glyph_quad` can borrow
+                // `&mut self` without aliasing the shaped-run reference.
+                let run_copy = run.shaped_run.clone();
+                for glyph in &run_copy.glyphs {
+                    self.rasterize_glyph_quad(
+                        glyph, &run_copy, pen_x, baseline_y, text_color, &mut quads,
+                    );
+                    pen_x += glyph.x_advance;
+                }
+            }
+            y_top += metrics.ascent + metrics.descent + metrics.leading;
+        }
+
+        ParagraphResult {
+            width: max_line_width,
+            height: y_top,
+            baseline_first,
+            line_count,
             glyphs: quads,
         }
     }
