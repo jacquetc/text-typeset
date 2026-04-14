@@ -1,5 +1,5 @@
 mod helpers;
-use helpers::{make_typesetter, Rect};
+use helpers::{Rect, make_typesetter};
 
 use text_typeset::TextFormat;
 
@@ -60,10 +60,7 @@ fn single_line_glyphs_advance_left_to_right() {
     let mut ts = make_typesetter();
     let result = ts.layout_single_line("ABCDEF", &TextFormat::default(), None);
 
-    assert!(
-        result.glyphs.len() >= 2,
-        "should have multiple glyph quads"
-    );
+    assert!(result.glyphs.len() >= 2, "should have multiple glyph quads");
     for i in 1..result.glyphs.len() {
         let prev_x = result.glyphs[i - 1].screen[0];
         let curr_x = result.glyphs[i].screen[0];
@@ -129,7 +126,11 @@ fn single_line_larger_font_is_taller() {
 #[test]
 fn single_line_max_width_truncates() {
     let mut ts = make_typesetter();
-    let full = ts.layout_single_line("Hello, world! This is a long sentence.", &TextFormat::default(), None);
+    let full = ts.layout_single_line(
+        "Hello, world! This is a long sentence.",
+        &TextFormat::default(),
+        None,
+    );
     let truncated = ts.layout_single_line(
         "Hello, world! This is a long sentence.",
         &TextFormat::default(),

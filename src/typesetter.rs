@@ -676,7 +676,9 @@ impl Typesetter {
         max_width: Option<f32>,
     ) -> SingleLineResult {
         use crate::font::resolve::resolve_font;
-        use crate::shaping::shaper::{bidi_runs, font_metrics_px, shape_text, shape_text_with_fallback};
+        use crate::shaping::shaper::{
+            bidi_runs, font_metrics_px, shape_text, shape_text_with_fallback,
+        };
 
         let empty = SingleLineResult {
             width: 0.0,
@@ -743,33 +745,32 @@ impl Typesetter {
         // Truncation operates on the visual-order glyph stream and cuts from
         // the visual-end (right side), matching the pre-bidi behavior for the
         // common single-direction case.
-        let (truncate_at_visual_index, final_width, ellipsis_run) =
-            if let Some(max_w) = max_width
-                && total_advance > max_w
-            {
-                let ellipsis_run = shape_text(&self.font_registry, &resolved, "\u{2026}", 0);
-                let ellipsis_width = ellipsis_run
-                    .as_ref()
-                    .map(|r| r.advance_width)
-                    .unwrap_or(0.0);
-                let budget = (max_w - ellipsis_width).max(0.0);
+        let (truncate_at_visual_index, final_width, ellipsis_run) = if let Some(max_w) = max_width
+            && total_advance > max_w
+        {
+            let ellipsis_run = shape_text(&self.font_registry, &resolved, "\u{2026}", 0);
+            let ellipsis_width = ellipsis_run
+                .as_ref()
+                .map(|r| r.advance_width)
+                .unwrap_or(0.0);
+            let budget = (max_w - ellipsis_width).max(0.0);
 
-                let mut used = 0.0f32;
-                let mut count = 0usize;
-                'outer: for run in &runs {
-                    for g in &run.glyphs {
-                        if used + g.x_advance > budget {
-                            break 'outer;
-                        }
-                        used += g.x_advance;
-                        count += 1;
+            let mut used = 0.0f32;
+            let mut count = 0usize;
+            'outer: for run in &runs {
+                for g in &run.glyphs {
+                    if used + g.x_advance > budget {
+                        break 'outer;
                     }
+                    used += g.x_advance;
+                    count += 1;
                 }
+            }
 
-                (Some(count), used + ellipsis_width, ellipsis_run)
-            } else {
-                (None, total_advance, None)
-            };
+            (Some(count), used + ellipsis_width, ellipsis_run)
+        } else {
+            (None, total_advance, None)
+        };
 
         // Rasterize glyphs in visual order and build GlyphQuads
         let text_color = format.color.unwrap_or(self.text_color);
@@ -785,14 +786,7 @@ impl Typesetter {
                 {
                     break 'emit;
                 }
-                self.rasterize_glyph_quad(
-                    glyph,
-                    run,
-                    pen_x,
-                    baseline,
-                    text_color,
-                    &mut quads,
-                );
+                self.rasterize_glyph_quad(glyph, run, pen_x, baseline, text_color, &mut quads);
                 pen_x += glyph.x_advance;
                 emitted += 1;
             }
@@ -801,14 +795,7 @@ impl Typesetter {
         // Render ellipsis glyphs if truncated
         if let Some(ref e_run) = ellipsis_run {
             for glyph in &e_run.glyphs {
-                self.rasterize_glyph_quad(
-                    glyph,
-                    e_run,
-                    pen_x,
-                    baseline,
-                    text_color,
-                    &mut quads,
-                );
+                self.rasterize_glyph_quad(glyph, e_run, pen_x, baseline, text_color, &mut quads);
                 pen_x += glyph.x_advance;
             }
         }
