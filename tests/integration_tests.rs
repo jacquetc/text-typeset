@@ -2,7 +2,9 @@
 //! These tests verify the full pipeline: TextDocument -> FlowSnapshot -> Typesetter -> RenderFrame.
 
 mod helpers;
-use helpers::{NOTO_SANS, Typesetter, assert_caret_is_real, assert_no_glyph_overlap, make_typesetter};
+use helpers::{
+    NOTO_SANS, Typesetter, assert_caret_is_real, assert_no_glyph_overlap, make_typesetter,
+};
 
 use text_document::TextDocument;
 #[test]

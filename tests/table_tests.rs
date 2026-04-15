@@ -3,7 +3,10 @@
 //! Uses the framework-agnostic API (no text-document dependency).
 
 mod helpers;
-use helpers::{NOTO_SANS, Rect, RenderFrameExt, Typesetter, assert_caret_is_real, assert_no_glyph_overlap, make_block_at, make_cell_at, make_frame, make_table};
+use helpers::{
+    NOTO_SANS, Rect, RenderFrameExt, Typesetter, assert_caret_is_real, assert_no_glyph_overlap,
+    make_block_at, make_cell_at, make_frame, make_table,
+};
 
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::{CursorDisplay, DecorationKind};

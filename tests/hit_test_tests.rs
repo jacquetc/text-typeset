@@ -1,5 +1,8 @@
 mod helpers;
-use helpers::{NOTO_SANS, Typesetter, assert_caret_is_real, make_block, make_block_at, make_cell_at, make_typesetter};
+use helpers::{
+    NOTO_SANS, Typesetter, assert_caret_is_real, make_block, make_block_at, make_cell_at,
+    make_typesetter,
+};
 
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};

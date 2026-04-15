@@ -120,19 +120,17 @@ fn parse_spans(source: &str, base_offset: usize) -> Vec<InlineSpan> {
     let mut text_start: usize = 0;
     let mut text_buf = String::new();
 
-    let flush_text = |out: &mut Vec<InlineSpan>,
-                          text_buf: &mut String,
-                          text_start: usize,
-                          end: usize| {
-        if !text_buf.is_empty() {
-            out.push(InlineSpan {
-                text: std::mem::take(text_buf),
-                attrs: InlineAttrs::EMPTY,
-                link_url: None,
-                byte_range: (base_offset + text_start)..(base_offset + end),
-            });
-        }
-    };
+    let flush_text =
+        |out: &mut Vec<InlineSpan>, text_buf: &mut String, text_start: usize, end: usize| {
+            if !text_buf.is_empty() {
+                out.push(InlineSpan {
+                    text: std::mem::take(text_buf),
+                    attrs: InlineAttrs::EMPTY,
+                    link_url: None,
+                    byte_range: (base_offset + text_start)..(base_offset + end),
+                });
+            }
+        };
 
     while i < bytes.len() {
         let b = bytes[i];

@@ -9,8 +9,7 @@ use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
 use text_typeset::{
     AtlasSnapshot, BlockVisualInfo, CharacterGeometry, ContentWidthMode, CursorDisplay,
     DecorationKind, DocumentFlow, FontFaceId, HitTestResult, InlineMarkup, ParagraphResult,
-    RenderFrame, SingleLineResult, TextFontService, TextFormat, UnderlineStyle,
-    VerticalAlignment,
+    RenderFrame, SingleLineResult, TextFontService, TextFormat, UnderlineStyle, VerticalAlignment,
 };
 
 pub const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
@@ -426,13 +425,8 @@ impl Typesetter {
         max_width: f32,
         max_lines: Option<usize>,
     ) -> ParagraphResult {
-        self.flow.layout_paragraph_markup(
-            &mut self.service,
-            markup,
-            format,
-            max_width,
-            max_lines,
-        )
+        self.flow
+            .layout_paragraph_markup(&mut self.service, markup, format, max_width, max_lines)
     }
 
     // ── Hit testing & geometry ──
@@ -445,8 +439,7 @@ impl Typesetter {
         char_start: usize,
         char_end: usize,
     ) -> Vec<CharacterGeometry> {
-        self.flow
-            .character_geometry(block_id, char_start, char_end)
+        self.flow.character_geometry(block_id, char_start, char_end)
     }
     pub fn caret_rect(&self, position: usize) -> [f32; 4] {
         self.flow.caret_rect(position)

@@ -42,6 +42,7 @@
 //! its own `layout_*` / `render` call, because those fields live on
 //! the flow itself, not on the shared service.
 
+use crate::TextFontService;
 use crate::font::resolve::resolve_font;
 use crate::layout::block::BlockLayoutParams;
 use crate::layout::flow::{FlowItem, FlowLayout};
@@ -56,7 +57,6 @@ use crate::types::{
     HitTestResult, LaidOutSpan, LaidOutSpanKind, ParagraphResult, RenderFrame, SingleLineResult,
     TextFormat,
 };
-use crate::TextFontService;
 
 /// Reasons [`DocumentFlow::relayout_block`] may refuse an
 /// incremental update.
@@ -319,11 +319,7 @@ impl DocumentFlow {
     /// Call on document load or `DocumentReset`. For single-block
     /// edits prefer [`relayout_block`](Self::relayout_block).
     #[cfg(feature = "text-document")]
-    pub fn layout_full(
-        &mut self,
-        service: &TextFontService,
-        flow: &text_document::FlowSnapshot,
-    ) {
+    pub fn layout_full(&mut self, service: &TextFontService, flow: &text_document::FlowSnapshot) {
         use crate::bridge::convert_flow;
 
         let converted = convert_flow(flow);
@@ -385,11 +381,7 @@ impl DocumentFlow {
 
     /// Append a frame to the current flow. The frame's position
     /// (inline, float, absolute) is carried in `params`.
-    pub fn add_frame(
-        &mut self,
-        service: &TextFontService,
-        params: &FrameLayoutParams,
-    ) {
+    pub fn add_frame(&mut self, service: &TextFontService, params: &FrameLayoutParams) {
         self.flow_layout.scale_factor = service.scale_factor;
         self.flow_layout
             .add_frame(&service.font_registry, params, self.layout_width());
@@ -397,11 +389,7 @@ impl DocumentFlow {
     }
 
     /// Append a table to the current flow.
-    pub fn add_table(
-        &mut self,
-        service: &TextFontService,
-        params: &TableLayoutParams,
-    ) {
+    pub fn add_table(&mut self, service: &TextFontService, params: &TableLayoutParams) {
         self.flow_layout.scale_factor = service.scale_factor;
         self.flow_layout
             .add_table(&service.font_registry, params, self.layout_width());
@@ -1210,7 +1198,13 @@ impl DocumentFlow {
                 let mut pen_x = pr.x;
                 for glyph in &run_copy.glyphs {
                     rasterize_glyph_quad(
-                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut glyphs_out,
+                        service,
+                        glyph,
+                        &run_copy,
+                        pen_x,
+                        baseline_y,
+                        text_color,
+                        &mut glyphs_out,
                     );
                     pen_x += glyph.x_advance;
                 }

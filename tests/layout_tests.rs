@@ -1,5 +1,7 @@
 mod helpers;
-use helpers::{Typesetter, assert_blocks_non_overlapping, make_block, make_block_at, make_typesetter};
+use helpers::{
+    Typesetter, assert_blocks_non_overlapping, make_block, make_block_at, make_typesetter,
+};
 
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::layout::block::layout_block;

@@ -1,5 +1,5 @@
 mod helpers;
-use helpers::{Typesetter, NOTO_SANS};
+use helpers::{NOTO_SANS, Typesetter};
 
 use text_document::{MoveMode, MoveOperation, TextDocument};
 const RICH_MARKDOWN: &str = "First paragraph with **bold words** and *italic words* and ~~strikethrough~~ and <u>underlined</u> and `inline code` wrapping at narrow viewport.
