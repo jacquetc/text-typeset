@@ -4,8 +4,8 @@ use crate::atlas::rasterizer::rasterize_glyph;
 use crate::font::registry::FontRegistry;
 use crate::layout::flow::{FlowItem, FlowLayout};
 use crate::types::{
-    BlockVisualInfo, CursorDisplay, FontFaceId, GlyphQuad, HitTestResult, ParagraphResult,
-    RenderFrame, SingleLineResult, TextFormat,
+    BlockVisualInfo, CharacterGeometry, CursorDisplay, FontFaceId, GlyphQuad, HitTestResult,
+    ParagraphResult, RenderFrame, SingleLineResult, TextFormat,
 };
 
 /// How the content (layout) width is determined.
@@ -1089,6 +1089,79 @@ impl Typesetter {
             x / self.zoom,
             y / self.zoom,
         )
+    }
+
+    /// Per-character advance geometry within a laid-out block, for
+    /// accessibility layers that need to expose character positions
+    /// to screen readers (AccessKit's `character_positions` /
+    /// `character_widths` on `Role::TextRun`).
+    ///
+    /// `char_start` and `char_end` are character offsets within the
+    /// block's plain text (block-relative, matching
+    /// [`LayoutLine::char_range`]). Returns one entry per character
+    /// in the range, with `position` measured in run-local
+    /// coordinates — the first character sits at `position == 0`,
+    /// later characters accumulate advance widths. `width` is the
+    /// advance width of each character.
+    ///
+    /// Returns an empty `Vec` if the block is not present in the
+    /// current layout or the range is empty.
+    pub fn character_geometry(
+        &self,
+        block_id: usize,
+        char_start: usize,
+        char_end: usize,
+    ) -> Vec<CharacterGeometry> {
+        if char_start >= char_end {
+            return Vec::new();
+        }
+        let block = match self.flow_layout.blocks.get(&block_id) {
+            Some(b) => b,
+            None => return Vec::new(),
+        };
+
+        // Walk lines, collect absolute x for each requested char.
+        let mut absolute: Vec<(usize, f32)> = Vec::with_capacity(char_end - char_start);
+        for line in &block.lines {
+            if line.char_range.end <= char_start || line.char_range.start >= char_end {
+                continue;
+            }
+            let local_start = char_start.max(line.char_range.start);
+            let local_end = char_end.min(line.char_range.end);
+            for c in local_start..local_end {
+                let x = line.x_for_offset(c);
+                absolute.push((c, x));
+            }
+            // Trailing sentinel for the last char so width computation
+            // has an "end" anchor on this line.
+            if local_end == char_end {
+                let x_end = line.x_for_offset(local_end);
+                absolute.push((local_end, x_end));
+            }
+        }
+
+        if absolute.is_empty() {
+            return Vec::new();
+        }
+
+        // Sort by character offset so normalization is monotonic even
+        // if lines walked out of order (they shouldn't, but defensive).
+        absolute.sort_by_key(|(c, _)| *c);
+
+        let base_x = absolute.first().map(|(_, x)| *x).unwrap_or(0.0);
+        let mut out: Vec<CharacterGeometry> = Vec::with_capacity(absolute.len());
+        for window in absolute.windows(2) {
+            let (c, x) = window[0];
+            let (_, x_next) = window[1];
+            if c >= char_end {
+                break;
+            }
+            out.push(CharacterGeometry {
+                position: x - base_x,
+                width: (x_next - x).max(0.0),
+            });
+        }
+        out
     }
 
     /// Get the screen-space caret rectangle at a document position.

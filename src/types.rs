@@ -308,3 +308,24 @@ impl RenderFrame {
         }
     }
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CharacterGeometry — accessibility per-character advance data
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Per-character advance geometry for a laid-out text run.
+///
+/// Consumed by accessibility layers that need to populate AccessKit's
+/// `character_positions` and `character_widths` on a `Role::TextRun`
+/// node so screen reader highlight cursors and screen magnifiers can
+/// track the caret at character granularity.
+///
+/// `position` is measured in run-local coordinates: the first
+/// character of the requested range sits at `position == 0.0`, and
+/// subsequent characters accumulate their advance widths. `width` is
+/// the advance width of each character, in the same units.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CharacterGeometry {
+    pub position: f32,
+    pub width: f32,
+}

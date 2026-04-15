@@ -136,6 +136,7 @@ fn convert_fragment(frag: &FragmentContent, heading_scale: f32) -> FragmentParam
             format,
             offset,
             length,
+            ..
         } => FragmentParams {
             text: text.clone(),
             offset: *offset,
@@ -173,6 +174,7 @@ fn convert_fragment(frag: &FragmentContent, heading_scale: f32) -> FragmentParam
             quality: _,
             format,
             offset,
+            ..
         } => FragmentParams {
             text: "\u{FFFC}".to_string(),
             offset: *offset,

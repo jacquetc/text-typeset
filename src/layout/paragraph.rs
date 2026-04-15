@@ -8,8 +8,18 @@ use crate::shaping::run::ShapedRun;
 use crate::shaping::shaper::FontMetricsPx;
 
 /// Convert a byte offset within a UTF-8 string to a char offset.
+///
+/// Clamps to `text.len()` and rounds down to the nearest char boundary
+/// if `byte_offset` lands inside a multi-byte character. HarfBuzz can
+/// emit cluster values that don't coincide with UTF-8 char boundaries
+/// (ligature splits, fallback shaping), so callers must never assume
+/// cluster values are well-aligned.
 fn byte_offset_to_char_offset(text: &str, byte_offset: usize) -> usize {
-    text[..byte_offset.min(text.len())].chars().count()
+    let mut off = byte_offset.min(text.len());
+    while off > 0 && !text.is_char_boundary(off) {
+        off -= 1;
+    }
+    text[..off].chars().count()
 }
 
 /// Text alignment within a line.
