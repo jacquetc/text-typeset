@@ -1,9 +1,7 @@
 mod helpers;
-use helpers::NOTO_SANS;
+use helpers::{Typesetter, NOTO_SANS};
 
 use text_document::{MoveMode, MoveOperation, TextDocument};
-use text_typeset::Typesetter;
-
 const RICH_MARKDOWN: &str = "First paragraph with **bold words** and *italic words* and ~~strikethrough~~ and <u>underlined</u> and `inline code` wrapping at narrow viewport.
 
 - Bullet item one short

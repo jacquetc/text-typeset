@@ -1,0 +1,1716 @@
+//! Per-widget document flow state.
+//!
+//! A [`DocumentFlow`] is everything that describes **what a specific
+//! widget is showing** — viewport, zoom, scroll offset, wrap mode,
+//! the laid-out flow (blocks / tables / frames), the rendered frame
+//! cache, the cursor(s), and the selection / caret / text colors.
+//!
+//! Flows do not own font data. Every layout and render call takes a
+//! [`TextFontService`] by reference and reads the font registry,
+//! glyph atlas, and glyph cache through it. This split lets many
+//! widgets in the same window share one atlas (and one GPU upload
+//! per frame) while each owns an independent view onto its own
+//! document.
+//!
+//! # Lifecycle
+//!
+//! ```rust,no_run
+//! use text_typeset::{DocumentFlow, TextFontService};
+//!
+//! let mut service = TextFontService::new();
+//! let face = service.register_font(include_bytes!("../test-fonts/NotoSans-Variable.ttf"));
+//! service.set_default_font(face, 16.0);
+//!
+//! let mut flow = DocumentFlow::new();
+//! flow.set_viewport(800.0, 600.0);
+//!
+//! # #[cfg(feature = "text-document")]
+//! # {
+//! let doc = text_document::TextDocument::new();
+//! doc.set_plain_text("Hello, world!").unwrap();
+//! flow.layout_full(&service, &doc.snapshot_flow());
+//! # }
+//!
+//! let frame = flow.render(&mut service);
+//! // frame.glyphs     -> glyph quads (textured rects from the shared atlas)
+//! // frame.decorations -> cursor, selection, underlines, borders
+//! ```
+//!
+//! The caller's pattern for a multi-widget UI is the same, plus one
+//! rule: each widget owns its own `DocumentFlow` and must re-push
+//! its view state (viewport, zoom, scroll, cursor, colors) before
+//! its own `layout_*` / `render` call, because those fields live on
+//! the flow itself, not on the shared service.
+
+use crate::font::resolve::resolve_font;
+use crate::layout::block::BlockLayoutParams;
+use crate::layout::flow::{FlowItem, FlowLayout};
+use crate::layout::frame::FrameLayoutParams;
+use crate::layout::inline_markup::{InlineAttrs, InlineMarkup};
+use crate::layout::paragraph::{Alignment, break_into_lines};
+use crate::layout::table::TableLayoutParams;
+use crate::shaping::run::{ShapedGlyph, ShapedRun};
+use crate::shaping::shaper::{bidi_runs, font_metrics_px, shape_text, shape_text_with_fallback};
+use crate::types::{
+    BlockVisualInfo, CharacterGeometry, CursorDisplay, DecorationKind, DecorationRect, GlyphQuad,
+    HitTestResult, LaidOutSpan, LaidOutSpanKind, ParagraphResult, RenderFrame, SingleLineResult,
+    TextFormat,
+};
+use crate::TextFontService;
+
+/// Reasons [`DocumentFlow::relayout_block`] may refuse an
+/// incremental update.
+///
+/// Both variants describe invariant violations the caller can
+/// detect structurally ahead of time by asking
+/// [`DocumentFlow::has_layout`] and
+/// [`DocumentFlow::layout_dirty_for_scale`]. Returned as a
+/// `Result` rather than panicking so a misbehaving caller
+/// produces a recoverable error at the exact call site instead
+/// of corrupting the flow with a partial relayout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayoutError {
+    /// No `layout_*` method has been called on this flow yet.
+    /// The caller must run [`DocumentFlow::layout_full`] or
+    /// [`DocumentFlow::layout_blocks`] first to establish a
+    /// baseline layout before incremental updates make sense.
+    NoLayout,
+    /// The backing [`TextFontService`] has had its HiDPI scale
+    /// factor changed since this flow was last laid out, so the
+    /// existing block layouts hold advances at the old ppem.
+    /// Re-shaping a single block would leave it at the new ppem
+    /// while neighbors stay at the old, producing an inconsistent
+    /// flow. The caller must re-run `layout_full` /
+    /// `layout_blocks` to rebuild everything at the new scale.
+    ScaleDirty,
+}
+
+impl std::fmt::Display for RelayoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RelayoutError::NoLayout => {
+                f.write_str("relayout_block called before any layout_* method")
+            }
+            RelayoutError::ScaleDirty => f.write_str(
+                "relayout_block called after a scale-factor change without a fresh layout_*",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RelayoutError {}
+
+/// How the content (layout) width is determined.
+///
+/// Controls whether text reflows when the viewport resizes (web or
+/// editor style) or wraps at a fixed width (page / WYSIWYG style).
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ContentWidthMode {
+    /// Content width equals viewport width (divided by zoom). Text
+    /// reflows on window resize — the default, typical for editors
+    /// and web layout.
+    #[default]
+    Auto,
+    /// Content width is fixed at a specific value, independent of
+    /// the viewport. Useful for page-like WYSIWYG layout, print
+    /// preview, or side panels with their own column width.
+    Fixed(f32),
+}
+
+/// Per-widget document flow state.
+///
+/// See the [module docs](self) for the shape of the split and for
+/// lifecycle examples. Every layout/render method here takes a
+/// [`TextFontService`] reference so flows can share one atlas across
+/// an entire window.
+pub struct DocumentFlow {
+    flow_layout: FlowLayout,
+    render_frame: RenderFrame,
+    scroll_offset: f32,
+    rendered_scroll_offset: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    content_width_mode: ContentWidthMode,
+    selection_color: [f32; 4],
+    cursor_color: [f32; 4],
+    text_color: [f32; 4],
+    cursors: Vec<CursorDisplay>,
+    zoom: f32,
+    rendered_zoom: f32,
+    /// `TextFontService::scale_generation` at the time of the last
+    /// `layout_*` call. Used by
+    /// [`layout_dirty_for_scale`](DocumentFlow::layout_dirty_for_scale)
+    /// so the framework can detect HiDPI transitions and re-run
+    /// layout without having to track them itself.
+    layout_scale_generation: u64,
+    /// Whether any `layout_*` call has been made at least once.
+    has_layout: bool,
+}
+
+impl DocumentFlow {
+    /// Create an empty flow with no content.
+    ///
+    /// After construction the caller typically calls
+    /// [`set_viewport`](Self::set_viewport) and one of the
+    /// `layout_*` methods before the first render.
+    pub fn new() -> Self {
+        Self {
+            flow_layout: FlowLayout::new(),
+            render_frame: RenderFrame::new(),
+            scroll_offset: 0.0,
+            rendered_scroll_offset: f32::NAN,
+            viewport_width: 0.0,
+            viewport_height: 0.0,
+            content_width_mode: ContentWidthMode::Auto,
+            selection_color: [0.26, 0.52, 0.96, 0.3],
+            cursor_color: [0.0, 0.0, 0.0, 1.0],
+            text_color: [0.0, 0.0, 0.0, 1.0],
+            cursors: Vec::new(),
+            zoom: 1.0,
+            rendered_zoom: f32::NAN,
+            layout_scale_generation: 0,
+            has_layout: false,
+        }
+    }
+
+    // ── Viewport & content width ───────────────────────────────
+
+    /// Set the visible area dimensions in logical pixels.
+    ///
+    /// The viewport controls:
+    ///
+    /// - **Culling**: only blocks within the viewport are rendered.
+    /// - **Selection highlight**: multi-line selection extends to
+    ///   the viewport width.
+    /// - **Layout width** (in [`ContentWidthMode::Auto`]): text
+    ///   wraps at `viewport_width / zoom`.
+    ///
+    /// Call this when the widget's container resizes. A resize by
+    /// itself does not relayout — re-run `layout_full` /
+    /// `layout_blocks` if the wrap width changed.
+    pub fn set_viewport(&mut self, width: f32, height: f32) {
+        self.viewport_width = width;
+        self.viewport_height = height;
+        self.flow_layout.viewport_width = width;
+        self.flow_layout.viewport_height = height;
+    }
+
+    /// Current viewport width in logical pixels.
+    pub fn viewport_width(&self) -> f32 {
+        self.viewport_width
+    }
+
+    /// Current viewport height in logical pixels.
+    pub fn viewport_height(&self) -> f32 {
+        self.viewport_height
+    }
+
+    /// Pin content width at a fixed value, independent of viewport.
+    ///
+    /// Text wraps at this width regardless of how wide the viewport
+    /// is. Use for page-like (WYSIWYG) layout or documents with an
+    /// explicit column width. Pass `f32::INFINITY` for no-wrap mode.
+    pub fn set_content_width(&mut self, width: f32) {
+        self.content_width_mode = ContentWidthMode::Fixed(width);
+    }
+
+    /// Reflow content width to follow the viewport (the default).
+    ///
+    /// Text re-wraps on every viewport resize. Standard editor and
+    /// web-style layout.
+    pub fn set_content_width_auto(&mut self) {
+        self.content_width_mode = ContentWidthMode::Auto;
+    }
+
+    /// The effective width used for text layout (line wrapping,
+    /// table columns, etc.).
+    ///
+    /// In [`ContentWidthMode::Auto`], equals `viewport_width / zoom`
+    /// so that text reflows to fit the zoomed viewport. In
+    /// [`ContentWidthMode::Fixed`], equals the set value (zoom only
+    /// magnifies the rendered output).
+    pub fn layout_width(&self) -> f32 {
+        match self.content_width_mode {
+            ContentWidthMode::Auto => self.viewport_width / self.zoom,
+            ContentWidthMode::Fixed(w) => w,
+        }
+    }
+
+    /// The currently configured content-width mode.
+    pub fn content_width_mode(&self) -> ContentWidthMode {
+        self.content_width_mode
+    }
+
+    /// Set the vertical scroll offset in logical pixels from the
+    /// top of the document. Affects culling and screen-space `y`
+    /// coordinates in the rendered frame.
+    pub fn set_scroll_offset(&mut self, offset: f32) {
+        self.scroll_offset = offset;
+    }
+
+    /// Current vertical scroll offset.
+    pub fn scroll_offset(&self) -> f32 {
+        self.scroll_offset
+    }
+
+    /// Total content height after layout, in logical pixels.
+    pub fn content_height(&self) -> f32 {
+        self.flow_layout.content_height
+    }
+
+    /// Maximum content width across all laid-out lines, in logical
+    /// pixels. Used for horizontal scrollbar range when wrapping
+    /// is disabled.
+    pub fn max_content_width(&self) -> f32 {
+        self.flow_layout.cached_max_content_width
+    }
+
+    // ── Zoom ────────────────────────────────────────────────────
+
+    /// Set the display zoom level (PDF-style, no reflow).
+    ///
+    /// Zoom is a pure display transform: layout stays at base size
+    /// and all screen-space output (glyph quads, decorations, caret
+    /// rects) is scaled by this factor. Hit-test inputs are
+    /// inversely scaled.
+    ///
+    /// For browser-style zoom that reflows text, combine with
+    /// `set_content_width(viewport_width / zoom)`.
+    ///
+    /// Clamped to `0.1..=10.0`. Default is `1.0`.
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom.clamp(0.1, 10.0);
+    }
+
+    /// Current display zoom level.
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    // ── Scale factor sync ───────────────────────────────────────
+
+    /// Whether any `layout_*` method has run on this flow at least
+    /// once. Callers that need to distinguish "never laid out"
+    /// from "laid out against a stale scale factor" read this
+    /// alongside [`layout_dirty_for_scale`](Self::layout_dirty_for_scale).
+    pub fn has_layout(&self) -> bool {
+        self.has_layout
+    }
+
+    /// Returns `true` when the backing [`TextFontService`] has had
+    /// its HiDPI scale factor changed since this flow was last laid
+    /// out, meaning stored shaped advances and cached ppem values
+    /// are stale.
+    ///
+    /// Call after every `service.set_scale_factor(...)` to decide
+    /// whether to re-run `layout_full` / `layout_blocks` before the
+    /// next render. Returns `false` for flows that have never been
+    /// laid out at all (nothing to invalidate).
+    pub fn layout_dirty_for_scale(&self, service: &TextFontService) -> bool {
+        self.has_layout && self.layout_scale_generation != service.scale_generation()
+    }
+
+    // ── Layout ──────────────────────────────────────────────────
+
+    /// Full layout from a text-document `FlowSnapshot`.
+    ///
+    /// Clears any existing flow state and lays out every element
+    /// (blocks, tables, frames) from the snapshot in flow order.
+    /// Call on document load or `DocumentReset`. For single-block
+    /// edits prefer [`relayout_block`](Self::relayout_block).
+    #[cfg(feature = "text-document")]
+    pub fn layout_full(
+        &mut self,
+        service: &TextFontService,
+        flow: &text_document::FlowSnapshot,
+    ) {
+        use crate::bridge::convert_flow;
+
+        let converted = convert_flow(flow);
+
+        // Merge all elements by flow index and process in order.
+        let mut all_items: Vec<(usize, FlowItemKind)> = Vec::new();
+        for (idx, params) in converted.blocks {
+            all_items.push((idx, FlowItemKind::Block(params)));
+        }
+        for (idx, params) in converted.tables {
+            all_items.push((idx, FlowItemKind::Table(params)));
+        }
+        for (idx, params) in converted.frames {
+            all_items.push((idx, FlowItemKind::Frame(params)));
+        }
+        all_items.sort_by_key(|(idx, _)| *idx);
+
+        let lw = self.layout_width();
+        self.flow_layout.clear();
+        self.flow_layout.viewport_width = self.viewport_width;
+        self.flow_layout.viewport_height = self.viewport_height;
+        self.flow_layout.scale_factor = service.scale_factor;
+
+        for (_idx, kind) in all_items {
+            match kind {
+                FlowItemKind::Block(params) => {
+                    self.flow_layout
+                        .add_block(&service.font_registry, &params, lw);
+                }
+                FlowItemKind::Table(params) => {
+                    self.flow_layout
+                        .add_table(&service.font_registry, &params, lw);
+                }
+                FlowItemKind::Frame(params) => {
+                    self.flow_layout
+                        .add_frame(&service.font_registry, &params, lw);
+                }
+            }
+        }
+
+        self.note_layout_done(service);
+    }
+
+    /// Lay out a list of blocks from scratch.
+    ///
+    /// Framework-agnostic entry point — the caller assembles
+    /// [`BlockLayoutParams`] directly without going through
+    /// text-document. Replaces any existing flow state.
+    pub fn layout_blocks(
+        &mut self,
+        service: &TextFontService,
+        block_params: Vec<BlockLayoutParams>,
+    ) {
+        self.flow_layout.scale_factor = service.scale_factor;
+        self.flow_layout
+            .layout_blocks(&service.font_registry, block_params, self.layout_width());
+        self.note_layout_done(service);
+    }
+
+    /// Append a frame to the current flow. The frame's position
+    /// (inline, float, absolute) is carried in `params`.
+    pub fn add_frame(
+        &mut self,
+        service: &TextFontService,
+        params: &FrameLayoutParams,
+    ) {
+        self.flow_layout.scale_factor = service.scale_factor;
+        self.flow_layout
+            .add_frame(&service.font_registry, params, self.layout_width());
+        self.note_layout_done(service);
+    }
+
+    /// Append a table to the current flow.
+    pub fn add_table(
+        &mut self,
+        service: &TextFontService,
+        params: &TableLayoutParams,
+    ) {
+        self.flow_layout.scale_factor = service.scale_factor;
+        self.flow_layout
+            .add_table(&service.font_registry, params, self.layout_width());
+        self.note_layout_done(service);
+    }
+
+    /// Relayout a single block after its content or formatting
+    /// changed.
+    ///
+    /// Re-shapes and re-wraps just that block, then shifts
+    /// subsequent items if the height changed. Much cheaper than a
+    /// full layout for single-block edits (typing, format toggles).
+    /// If the block lives inside a table cell, the row height is
+    /// re-measured and content below the table shifts.
+    ///
+    /// # Invariants
+    ///
+    /// This is an incremental operation and only makes sense when
+    /// a valid layout is already installed on this flow, laid out
+    /// against the same HiDPI scale factor the service currently
+    /// reports. Violations produce a [`RelayoutError`]:
+    ///
+    /// - [`RelayoutError::NoLayout`] if no `layout_*` method has
+    ///   run on this flow yet — there is nothing to update.
+    /// - [`RelayoutError::ScaleDirty`] if the service's scale
+    ///   factor has changed since the last layout — reshaping a
+    ///   single block would leave neighbors at the old ppem and
+    ///   produce an inconsistent flow. The caller must re-run
+    ///   [`layout_full`](Self::layout_full) / [`layout_blocks`](Self::layout_blocks)
+    ///   first.
+    ///
+    /// Both conditions are detected structurally from
+    /// [`has_layout`](Self::has_layout) and
+    /// [`layout_dirty_for_scale`](Self::layout_dirty_for_scale),
+    /// so callers that already guard those don't need to handle
+    /// the error.
+    pub fn relayout_block(
+        &mut self,
+        service: &TextFontService,
+        params: &BlockLayoutParams,
+    ) -> Result<(), RelayoutError> {
+        if !self.has_layout {
+            return Err(RelayoutError::NoLayout);
+        }
+        if self.layout_scale_generation != service.scale_generation() {
+            return Err(RelayoutError::ScaleDirty);
+        }
+        self.flow_layout.scale_factor = service.scale_factor;
+        self.flow_layout
+            .relayout_block(&service.font_registry, params, self.layout_width());
+        self.note_layout_done(service);
+        Ok(())
+    }
+
+    fn note_layout_done(&mut self, service: &TextFontService) {
+        self.has_layout = true;
+        self.layout_scale_generation = service.scale_generation();
+    }
+
+    // ── Rendering ──────────────────────────────────────────────
+
+    /// Render the visible viewport and return the produced frame.
+    ///
+    /// Performs viewport culling, rasterizes any glyphs missing
+    /// from the atlas into it, and emits glyph quads, image quads,
+    /// and decoration rectangles. The returned reference borrows
+    /// both `self` and `service`; drop it before the next mutation.
+    ///
+    /// On every call, stale glyphs (unused for ~120 frames) are
+    /// evicted from the atlas to reclaim slot space.
+    pub fn render(&mut self, service: &mut TextFontService) -> &RenderFrame {
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
+        crate::render::frame::build_render_frame(
+            &self.flow_layout,
+            &service.font_registry,
+            &mut service.atlas,
+            &mut service.glyph_cache,
+            &mut service.scale_context,
+            self.scroll_offset,
+            effective_vw,
+            effective_vh,
+            &self.cursors,
+            self.cursor_color,
+            self.selection_color,
+            self.text_color,
+            &mut self.render_frame,
+        );
+        self.rendered_scroll_offset = self.scroll_offset;
+        self.rendered_zoom = self.zoom;
+        apply_zoom(&mut self.render_frame, self.zoom);
+        &self.render_frame
+    }
+
+    /// Incremental render that only re-renders one block's glyphs.
+    ///
+    /// Reuses cached glyph / decoration data for all other blocks
+    /// from the last full `render()`. Call after
+    /// [`relayout_block`](Self::relayout_block) when only one block's
+    /// text changed.
+    ///
+    /// Falls back to a full [`render`](Self::render) if the block's
+    /// height changed (subsequent glyph positions would be stale),
+    /// if scroll offset or zoom changed since the last full render,
+    /// or if the block lives inside a table / frame (those are
+    /// cached with a different key).
+    pub fn render_block_only(
+        &mut self,
+        service: &mut TextFontService,
+        block_id: usize,
+    ) -> &RenderFrame {
+        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001
+            || (self.zoom - self.rendered_zoom).abs() > 0.001
+        {
+            return self.render(service);
+        }
+
+        if !self.flow_layout.blocks.contains_key(&block_id) {
+            let in_table = self.flow_layout.tables.values().any(|table| {
+                table
+                    .cell_layouts
+                    .iter()
+                    .any(|c| c.blocks.iter().any(|b| b.block_id == block_id))
+            });
+            if in_table {
+                return self.render(service);
+            }
+            let in_frame = self
+                .flow_layout
+                .frames
+                .values()
+                .any(|frame| crate::layout::flow::frame_contains_block(frame, block_id));
+            if in_frame {
+                return self.render(service);
+            }
+        }
+
+        if let Some(block) = self.flow_layout.blocks.get(&block_id) {
+            let old_height = self
+                .render_frame
+                .block_heights
+                .get(&block_id)
+                .copied()
+                .unwrap_or(block.height);
+            if (block.height - old_height).abs() > 0.001 {
+                return self.render(service);
+            }
+        }
+
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
+        let scale_factor = service.scale_factor;
+        let mut new_glyphs = Vec::new();
+        let mut new_images = Vec::new();
+        if let Some(block) = self.flow_layout.blocks.get(&block_id) {
+            let mut tmp = RenderFrame::new();
+            crate::render::frame::render_block_at_offset(
+                block,
+                0.0,
+                0.0,
+                &service.font_registry,
+                &mut service.atlas,
+                &mut service.glyph_cache,
+                &mut service.scale_context,
+                self.scroll_offset,
+                effective_vh,
+                self.text_color,
+                scale_factor,
+                &mut tmp,
+            );
+            new_glyphs = tmp.glyphs;
+            new_images = tmp.images;
+        }
+
+        let new_decos = if let Some(block) = self.flow_layout.blocks.get(&block_id) {
+            crate::render::decoration::generate_block_decorations(
+                block,
+                &service.font_registry,
+                self.scroll_offset,
+                effective_vh,
+                0.0,
+                0.0,
+                effective_vw,
+                self.text_color,
+                scale_factor,
+            )
+        } else {
+            Vec::new()
+        };
+
+        if let Some(entry) = self
+            .render_frame
+            .block_glyphs
+            .iter_mut()
+            .find(|(id, _)| *id == block_id)
+        {
+            entry.1 = new_glyphs;
+        }
+        if let Some(entry) = self
+            .render_frame
+            .block_images
+            .iter_mut()
+            .find(|(id, _)| *id == block_id)
+        {
+            entry.1 = new_images;
+        }
+        if let Some(entry) = self
+            .render_frame
+            .block_decorations
+            .iter_mut()
+            .find(|(id, _)| *id == block_id)
+        {
+            entry.1 = new_decos;
+        }
+
+        self.rebuild_flat_frame(service);
+        apply_zoom(&mut self.render_frame, self.zoom);
+        &self.render_frame
+    }
+
+    /// Lightweight render that only updates cursor/selection
+    /// decorations.
+    ///
+    /// Reuses the existing glyph quads and images from the last
+    /// full `render()`. Use when only the cursor blinked or the
+    /// selection changed. Falls back to a full [`render`](Self::render)
+    /// if the scroll offset or zoom changed in the meantime.
+    pub fn render_cursor_only(&mut self, service: &mut TextFontService) -> &RenderFrame {
+        if (self.scroll_offset - self.rendered_scroll_offset).abs() > 0.001
+            || (self.zoom - self.rendered_zoom).abs() > 0.001
+        {
+            return self.render(service);
+        }
+
+        self.render_frame.decorations.retain(|d| {
+            !matches!(
+                d.kind,
+                DecorationKind::Cursor | DecorationKind::Selection | DecorationKind::CellSelection
+            )
+        });
+
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
+        let mut cursor_decos = crate::render::cursor::generate_cursor_decorations(
+            &self.flow_layout,
+            &self.cursors,
+            self.scroll_offset,
+            self.cursor_color,
+            self.selection_color,
+            effective_vw,
+            effective_vh,
+        );
+        apply_zoom_decorations(&mut cursor_decos, self.zoom);
+        self.render_frame.decorations.extend(cursor_decos);
+
+        &self.render_frame
+    }
+
+    fn rebuild_flat_frame(&mut self, service: &mut TextFontService) {
+        self.render_frame.glyphs.clear();
+        self.render_frame.images.clear();
+        self.render_frame.decorations.clear();
+        for (_, glyphs) in &self.render_frame.block_glyphs {
+            self.render_frame.glyphs.extend_from_slice(glyphs);
+        }
+        for (_, images) in &self.render_frame.block_images {
+            self.render_frame.images.extend_from_slice(images);
+        }
+        for (_, decos) in &self.render_frame.block_decorations {
+            self.render_frame.decorations.extend_from_slice(decos);
+        }
+
+        for item in &self.flow_layout.flow_order {
+            match item {
+                FlowItem::Table { table_id, .. } => {
+                    if let Some(table) = self.flow_layout.tables.get(table_id) {
+                        let decos = crate::layout::table::generate_table_decorations(
+                            table,
+                            self.scroll_offset,
+                        );
+                        self.render_frame.decorations.extend(decos);
+                    }
+                }
+                FlowItem::Frame { frame_id, .. } => {
+                    if let Some(frame) = self.flow_layout.frames.get(frame_id) {
+                        crate::render::frame::append_frame_border_decorations(
+                            frame,
+                            self.scroll_offset,
+                            &mut self.render_frame.decorations,
+                        );
+                    }
+                }
+                FlowItem::Block { .. } => {}
+            }
+        }
+
+        let effective_vw = self.viewport_width / self.zoom;
+        let effective_vh = self.viewport_height / self.zoom;
+        let cursor_decos = crate::render::cursor::generate_cursor_decorations(
+            &self.flow_layout,
+            &self.cursors,
+            self.scroll_offset,
+            self.cursor_color,
+            self.selection_color,
+            effective_vw,
+            effective_vh,
+        );
+        self.render_frame.decorations.extend(cursor_decos);
+
+        self.render_frame.atlas_dirty = service.atlas.dirty;
+        self.render_frame.atlas_width = service.atlas.width;
+        self.render_frame.atlas_height = service.atlas.height;
+        if service.atlas.dirty {
+            let pixels = &service.atlas.pixels;
+            let needed = (service.atlas.width * service.atlas.height * 4) as usize;
+            self.render_frame.atlas_pixels.resize(needed, 0);
+            let copy_len = needed.min(pixels.len());
+            self.render_frame.atlas_pixels[..copy_len].copy_from_slice(&pixels[..copy_len]);
+            service.atlas.dirty = false;
+        }
+    }
+
+    // ── Single-line layout ──────────────────────────────────────
+
+    /// Lay out a single line of text and return GPU-ready glyph
+    /// quads. Fast path for labels, tooltips, overlays — anything
+    /// that doesn't need the full document pipeline.
+    ///
+    /// If `max_width` is set and the shaped text exceeds it, the
+    /// output is truncated with an ellipsis character. Glyph quads
+    /// are positioned with the top-left at `(0, 0)`.
+    pub fn layout_single_line(
+        &mut self,
+        service: &mut TextFontService,
+        text: &str,
+        format: &TextFormat,
+        max_width: Option<f32>,
+    ) -> SingleLineResult {
+        let empty = SingleLineResult {
+            width: 0.0,
+            height: 0.0,
+            baseline: 0.0,
+            glyphs: Vec::new(),
+            spans: Vec::new(),
+        };
+
+        if text.is_empty() {
+            return empty;
+        }
+
+        let font_point_size = format.font_size.map(|s| s as u32);
+        let resolved = match resolve_font(
+            &service.font_registry,
+            format.font_family.as_deref(),
+            format.font_weight,
+            format.font_bold,
+            format.font_italic,
+            font_point_size,
+            service.scale_factor,
+        ) {
+            Some(r) => r,
+            None => return empty,
+        };
+
+        let metrics = match font_metrics_px(&service.font_registry, &resolved) {
+            Some(m) => m,
+            None => return empty,
+        };
+        let line_height = metrics.ascent + metrics.descent + metrics.leading;
+        let baseline = metrics.ascent;
+
+        let runs: Vec<_> = bidi_runs(text)
+            .into_iter()
+            .filter_map(|br| {
+                let slice = text.get(br.byte_range.clone())?;
+                shape_text_with_fallback(
+                    &service.font_registry,
+                    &resolved,
+                    slice,
+                    br.byte_range.start,
+                    br.direction,
+                )
+            })
+            .collect();
+
+        if runs.is_empty() {
+            return empty;
+        }
+
+        let total_advance: f32 = runs.iter().map(|r| r.advance_width).sum();
+
+        let (truncate_at_visual_index, final_width, ellipsis_run) = if let Some(max_w) = max_width
+            && total_advance > max_w
+        {
+            let ellipsis_run = shape_text(&service.font_registry, &resolved, "\u{2026}", 0);
+            let ellipsis_width = ellipsis_run
+                .as_ref()
+                .map(|r| r.advance_width)
+                .unwrap_or(0.0);
+            let budget = (max_w - ellipsis_width).max(0.0);
+
+            let mut used = 0.0f32;
+            let mut count = 0usize;
+            'outer: for run in &runs {
+                for g in &run.glyphs {
+                    if used + g.x_advance > budget {
+                        break 'outer;
+                    }
+                    used += g.x_advance;
+                    count += 1;
+                }
+            }
+
+            (Some(count), used + ellipsis_width, ellipsis_run)
+        } else {
+            (None, total_advance, None)
+        };
+
+        let text_color = format.color.unwrap_or(self.text_color);
+        let glyph_capacity: usize = runs.iter().map(|r| r.glyphs.len()).sum();
+        let mut quads = Vec::with_capacity(glyph_capacity + 1);
+        let mut pen_x = 0.0f32;
+        let mut emitted = 0usize;
+
+        'emit: for run in &runs {
+            for glyph in &run.glyphs {
+                if let Some(limit) = truncate_at_visual_index
+                    && emitted >= limit
+                {
+                    break 'emit;
+                }
+                rasterize_glyph_quad(service, glyph, run, pen_x, baseline, text_color, &mut quads);
+                pen_x += glyph.x_advance;
+                emitted += 1;
+            }
+        }
+
+        if let Some(ref e_run) = ellipsis_run {
+            for glyph in &e_run.glyphs {
+                rasterize_glyph_quad(
+                    service, glyph, e_run, pen_x, baseline, text_color, &mut quads,
+                );
+                pen_x += glyph.x_advance;
+            }
+        }
+
+        SingleLineResult {
+            width: final_width,
+            height: line_height,
+            baseline,
+            glyphs: quads,
+            spans: Vec::new(),
+        }
+    }
+
+    /// Lay out a multi-line paragraph by wrapping text at `max_width`.
+    ///
+    /// Multi-line counterpart to
+    /// [`layout_single_line`](Self::layout_single_line). Shapes the
+    /// input, breaks it at Unicode line-break opportunities
+    /// (greedy, left-aligned), and rasterizes each line's glyphs
+    /// into paragraph-local coordinates starting at `(0, 0)`.
+    ///
+    /// If `max_lines` is `Some(n)`, at most `n` lines are emitted
+    /// and any remainder is silently dropped.
+    pub fn layout_paragraph(
+        &mut self,
+        service: &mut TextFontService,
+        text: &str,
+        format: &TextFormat,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> ParagraphResult {
+        let empty = ParagraphResult {
+            width: 0.0,
+            height: 0.0,
+            baseline_first: 0.0,
+            line_count: 0,
+            line_height: 0.0,
+            glyphs: Vec::new(),
+            spans: Vec::new(),
+        };
+
+        if text.is_empty() || max_width <= 0.0 {
+            return empty;
+        }
+
+        let font_point_size = format.font_size.map(|s| s as u32);
+        let resolved = match resolve_font(
+            &service.font_registry,
+            format.font_family.as_deref(),
+            format.font_weight,
+            format.font_bold,
+            format.font_italic,
+            font_point_size,
+            service.scale_factor,
+        ) {
+            Some(r) => r,
+            None => return empty,
+        };
+
+        let metrics = match font_metrics_px(&service.font_registry, &resolved) {
+            Some(m) => m,
+            None => return empty,
+        };
+
+        let runs: Vec<_> = bidi_runs(text)
+            .into_iter()
+            .filter_map(|br| {
+                let slice = text.get(br.byte_range.clone())?;
+                shape_text_with_fallback(
+                    &service.font_registry,
+                    &resolved,
+                    slice,
+                    br.byte_range.start,
+                    br.direction,
+                )
+            })
+            .collect();
+
+        if runs.is_empty() {
+            return empty;
+        }
+
+        let lines = break_into_lines(runs, text, max_width, Alignment::Left, 0.0, &metrics);
+
+        let line_count = match max_lines {
+            Some(n) => lines.len().min(n),
+            None => lines.len(),
+        };
+
+        let text_color = format.color.unwrap_or(self.text_color);
+        let mut quads: Vec<GlyphQuad> = Vec::new();
+        let mut y_top = 0.0f32;
+        let mut max_line_width = 0.0f32;
+        let baseline_first = metrics.ascent;
+
+        for line in lines.iter().take(line_count) {
+            if line.width > max_line_width {
+                max_line_width = line.width;
+            }
+            let baseline_y = y_top + metrics.ascent;
+            for run in &line.runs {
+                let mut pen_x = run.x;
+                let run_copy = run.shaped_run.clone();
+                for glyph in &run_copy.glyphs {
+                    rasterize_glyph_quad(
+                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut quads,
+                    );
+                    pen_x += glyph.x_advance;
+                }
+            }
+            y_top += metrics.ascent + metrics.descent + metrics.leading;
+        }
+
+        let line_height = metrics.ascent + metrics.descent + metrics.leading;
+        ParagraphResult {
+            width: max_line_width,
+            height: y_top,
+            baseline_first,
+            line_count,
+            line_height,
+            glyphs: quads,
+            spans: Vec::new(),
+        }
+    }
+
+    /// Single-line layout with inline markup. See
+    /// [`layout_single_line`](Self::layout_single_line) for the plain
+    /// variant. Accepts parsed `[label](url)`, `*italic*`, and
+    /// `**bold**` spans and annotates the output with per-span
+    /// bounding rectangles for hit-testing.
+    pub fn layout_single_line_markup(
+        &mut self,
+        service: &mut TextFontService,
+        markup: &InlineMarkup,
+        format: &TextFormat,
+        max_width: Option<f32>,
+    ) -> SingleLineResult {
+        if markup.spans.is_empty() {
+            return SingleLineResult {
+                width: 0.0,
+                height: 0.0,
+                baseline: 0.0,
+                glyphs: Vec::new(),
+                spans: Vec::new(),
+            };
+        }
+
+        let per_span: Vec<(SingleLineResult, &crate::layout::inline_markup::InlineSpan)> = markup
+            .spans
+            .iter()
+            .map(|sp| {
+                let fmt = merge_format(format, sp.attrs);
+                let r = if sp.text.is_empty() {
+                    SingleLineResult {
+                        width: 0.0,
+                        height: 0.0,
+                        baseline: 0.0,
+                        glyphs: Vec::new(),
+                        spans: Vec::new(),
+                    }
+                } else {
+                    self.layout_single_line(service, &sp.text, &fmt, None)
+                };
+                (r, sp)
+            })
+            .collect();
+
+        let total_width: f32 = per_span.iter().map(|(r, _)| r.width).sum();
+        let line_height = per_span
+            .iter()
+            .map(|(r, _)| r.height)
+            .fold(0.0f32, f32::max);
+        let baseline = per_span
+            .iter()
+            .map(|(r, _)| r.baseline)
+            .fold(0.0f32, f32::max);
+
+        let truncate = match max_width {
+            Some(mw) if total_width > mw => Some(mw),
+            _ => None,
+        };
+
+        let mut glyphs: Vec<GlyphQuad> = Vec::new();
+        let mut spans_out: Vec<LaidOutSpan> = Vec::new();
+        let mut pen_x: f32 = 0.0;
+        let effective_width = truncate.unwrap_or(total_width);
+
+        for (r, sp) in &per_span {
+            let remaining = (effective_width - pen_x).max(0.0);
+            let span_visible_width = r.width.min(remaining);
+            if span_visible_width <= 0.0 && r.width > 0.0 {
+                spans_out.push(LaidOutSpan {
+                    kind: if let Some(url) = sp.link_url.clone() {
+                        LaidOutSpanKind::Link { url }
+                    } else {
+                        LaidOutSpanKind::Text
+                    },
+                    line_index: 0,
+                    rect: [pen_x, 0.0, 0.0, line_height],
+                    byte_range: sp.byte_range.clone(),
+                });
+                continue;
+            }
+
+            for g in &r.glyphs {
+                let g_right = pen_x + g.screen[0] + g.screen[2];
+                if g_right > effective_width + 0.5 {
+                    break;
+                }
+                let mut gq = g.clone();
+                gq.screen[0] += pen_x;
+                glyphs.push(gq);
+            }
+
+            spans_out.push(LaidOutSpan {
+                kind: if let Some(url) = sp.link_url.clone() {
+                    LaidOutSpanKind::Link { url }
+                } else {
+                    LaidOutSpanKind::Text
+                },
+                line_index: 0,
+                rect: [pen_x, 0.0, span_visible_width, line_height],
+                byte_range: sp.byte_range.clone(),
+            });
+
+            pen_x += r.width;
+            if truncate.is_some() && pen_x >= effective_width {
+                break;
+            }
+        }
+
+        SingleLineResult {
+            width: effective_width,
+            height: line_height,
+            baseline,
+            glyphs,
+            spans: spans_out,
+        }
+    }
+
+    /// Paragraph layout with inline markup. Multi-line counterpart
+    /// to [`layout_single_line_markup`](Self::layout_single_line_markup).
+    /// Emits a [`LaidOutSpan`] for every link segment so the caller
+    /// can hit-test against wrapped links.
+    pub fn layout_paragraph_markup(
+        &mut self,
+        service: &mut TextFontService,
+        markup: &InlineMarkup,
+        format: &TextFormat,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> ParagraphResult {
+        let empty = ParagraphResult {
+            width: 0.0,
+            height: 0.0,
+            baseline_first: 0.0,
+            line_count: 0,
+            line_height: 0.0,
+            glyphs: Vec::new(),
+            spans: Vec::new(),
+        };
+
+        if markup.spans.is_empty() || max_width <= 0.0 {
+            return empty;
+        }
+
+        let mut flat = String::new();
+        let mut span_flat_offsets: Vec<usize> = Vec::with_capacity(markup.spans.len());
+        for sp in &markup.spans {
+            span_flat_offsets.push(flat.len());
+            flat.push_str(&sp.text);
+        }
+        if flat.is_empty() {
+            return empty;
+        }
+
+        let base_point_size = format.font_size.map(|s| s as u32);
+        let base_resolved = match resolve_font(
+            &service.font_registry,
+            format.font_family.as_deref(),
+            format.font_weight,
+            format.font_bold,
+            format.font_italic,
+            base_point_size,
+            service.scale_factor,
+        ) {
+            Some(r) => r,
+            None => return empty,
+        };
+        let metrics = match font_metrics_px(&service.font_registry, &base_resolved) {
+            Some(m) => m,
+            None => return empty,
+        };
+
+        let mut all_runs: Vec<ShapedRun> = Vec::new();
+        for (span_idx, sp) in markup.spans.iter().enumerate() {
+            if sp.text.is_empty() {
+                continue;
+            }
+            let fmt = merge_format(format, sp.attrs);
+            let span_point_size = fmt.font_size.map(|s| s as u32);
+            let Some(resolved) = resolve_font(
+                &service.font_registry,
+                fmt.font_family.as_deref(),
+                fmt.font_weight,
+                fmt.font_bold,
+                fmt.font_italic,
+                span_point_size,
+                service.scale_factor,
+            ) else {
+                continue;
+            };
+
+            let flat_start = span_flat_offsets[span_idx];
+            for br in bidi_runs(&sp.text) {
+                let slice = match sp.text.get(br.byte_range.clone()) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let Some(mut run) = shape_text_with_fallback(
+                    &service.font_registry,
+                    &resolved,
+                    slice,
+                    flat_start + br.byte_range.start,
+                    br.direction,
+                ) else {
+                    continue;
+                };
+                if let Some(url) = sp.link_url.as_ref() {
+                    run.is_link = true;
+                    run.anchor_href = Some(url.clone());
+                }
+                all_runs.push(run);
+            }
+        }
+
+        if all_runs.is_empty() {
+            return empty;
+        }
+
+        let lines = break_into_lines(all_runs, &flat, max_width, Alignment::Left, 0.0, &metrics);
+
+        let line_count = match max_lines {
+            Some(n) => lines.len().min(n),
+            None => lines.len(),
+        };
+
+        let text_color = format.color.unwrap_or(self.text_color);
+        let mut glyphs_out: Vec<GlyphQuad> = Vec::new();
+        let mut spans_out: Vec<LaidOutSpan> = Vec::new();
+        let line_height = metrics.ascent + metrics.descent + metrics.leading;
+        let mut y_top: f32 = 0.0;
+        let mut max_line_width: f32 = 0.0;
+        let baseline_first = metrics.ascent;
+
+        for (line_idx, line) in lines.iter().take(line_count).enumerate() {
+            if line.width > max_line_width {
+                max_line_width = line.width;
+            }
+            let baseline_y = y_top + metrics.ascent;
+
+            for pr in &line.runs {
+                let run_copy = pr.shaped_run.clone();
+                let mut pen_x = pr.x;
+                for glyph in &run_copy.glyphs {
+                    rasterize_glyph_quad(
+                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut glyphs_out,
+                    );
+                    pen_x += glyph.x_advance;
+                }
+
+                if pr.decorations.is_link
+                    && let Some(url) = pr.decorations.anchor_href.clone()
+                {
+                    let width = pr.shaped_run.advance_width;
+                    spans_out.push(LaidOutSpan {
+                        kind: LaidOutSpanKind::Link { url },
+                        line_index: line_idx,
+                        rect: [pr.x, y_top, width, line_height],
+                        byte_range: pr.shaped_run.text_range.clone(),
+                    });
+                }
+            }
+
+            y_top += line_height;
+        }
+
+        ParagraphResult {
+            width: max_line_width,
+            height: y_top,
+            baseline_first,
+            line_count,
+            line_height,
+            glyphs: glyphs_out,
+            spans: spans_out,
+        }
+    }
+
+    // ── Hit testing & character geometry ───────────────────────
+
+    /// Map a screen-space point to a document position. Coordinates
+    /// are relative to the widget's top-left corner; the scroll
+    /// offset is applied internally. Returns `None` when the flow
+    /// has no content.
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<HitTestResult> {
+        crate::render::hit_test::hit_test(
+            &self.flow_layout,
+            self.scroll_offset,
+            x / self.zoom,
+            y / self.zoom,
+        )
+    }
+
+    /// Per-character advance geometry within a laid-out block.
+    ///
+    /// Used by accessibility layers that need to expose character
+    /// positions to screen readers (AccessKit's `character_positions`
+    /// / `character_widths` on `Role::TextRun`). `char_start` and
+    /// `char_end` are block-relative character offsets. Returns one
+    /// entry per character in the range, with `position` measured
+    /// in run-local coordinates (the first character sits at `0`).
+    pub fn character_geometry(
+        &self,
+        block_id: usize,
+        char_start: usize,
+        char_end: usize,
+    ) -> Vec<CharacterGeometry> {
+        if char_start >= char_end {
+            return Vec::new();
+        }
+        let block = match self.flow_layout.blocks.get(&block_id) {
+            Some(b) => b,
+            None => return Vec::new(),
+        };
+
+        let mut absolute: Vec<(usize, f32)> = Vec::with_capacity(char_end - char_start);
+        for line in &block.lines {
+            if line.char_range.end <= char_start || line.char_range.start >= char_end {
+                continue;
+            }
+            let local_start = char_start.max(line.char_range.start);
+            let local_end = char_end.min(line.char_range.end);
+            for c in local_start..local_end {
+                let x = line.x_for_offset(c);
+                absolute.push((c, x));
+            }
+            if local_end == char_end {
+                let x_end = line.x_for_offset(local_end);
+                absolute.push((local_end, x_end));
+            }
+        }
+
+        if absolute.is_empty() {
+            return Vec::new();
+        }
+
+        absolute.sort_by_key(|(c, _)| *c);
+
+        let base_x = absolute.first().map(|(_, x)| *x).unwrap_or(0.0);
+        let mut out: Vec<CharacterGeometry> = Vec::with_capacity(absolute.len());
+        for window in absolute.windows(2) {
+            let (c, x) = window[0];
+            let (_, x_next) = window[1];
+            if c >= char_end {
+                break;
+            }
+            out.push(CharacterGeometry {
+                position: x - base_x,
+                width: (x_next - x).max(0.0),
+            });
+        }
+        out
+    }
+
+    /// Screen-space caret rectangle at a document position, as
+    /// `[x, y, width, height]`. Feed this to the platform IME for
+    /// composition window placement. For drawing the caret itself,
+    /// use the `DecorationKind::Cursor` entry in
+    /// [`RenderFrame::decorations`] instead.
+    pub fn caret_rect(&self, position: usize) -> [f32; 4] {
+        let mut rect =
+            crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position);
+        rect[0] *= self.zoom;
+        rect[1] *= self.zoom;
+        rect[2] *= self.zoom;
+        rect[3] *= self.zoom;
+        rect
+    }
+
+    // ── Cursor & colors ────────────────────────────────────────
+
+    /// Replace the cursor display with a single cursor.
+    pub fn set_cursor(&mut self, cursor: &CursorDisplay) {
+        self.cursors = vec![CursorDisplay {
+            position: cursor.position,
+            anchor: cursor.anchor,
+            visible: cursor.visible,
+            selected_cells: cursor.selected_cells.clone(),
+        }];
+    }
+
+    /// Replace the cursor display with multiple cursors (multi-caret
+    /// editing). Each cursor independently generates a caret and
+    /// optional selection highlight.
+    pub fn set_cursors(&mut self, cursors: &[CursorDisplay]) {
+        self.cursors = cursors
+            .iter()
+            .map(|c| CursorDisplay {
+                position: c.position,
+                anchor: c.anchor,
+                visible: c.visible,
+                selected_cells: c.selected_cells.clone(),
+            })
+            .collect();
+    }
+
+    /// Set the selection highlight color `[r, g, b, a]` in 0..=1
+    /// space. Default: `[0.26, 0.52, 0.96, 0.3]` (translucent blue).
+    pub fn set_selection_color(&mut self, color: [f32; 4]) {
+        self.selection_color = color;
+    }
+
+    /// Set the caret color `[r, g, b, a]`. Default: black.
+    pub fn set_cursor_color(&mut self, color: [f32; 4]) {
+        self.cursor_color = color;
+    }
+
+    /// Set the default text color `[r, g, b, a]`, used when a
+    /// fragment has no explicit `foreground_color`. Default: black.
+    pub fn set_text_color(&mut self, color: [f32; 4]) {
+        self.text_color = color;
+    }
+
+    /// Current default text color.
+    pub fn text_color(&self) -> [f32; 4] {
+        self.text_color
+    }
+
+    // ── Scrolling helpers ──────────────────────────────────────
+
+    /// Visual position and height of a laid-out block. Returns
+    /// `None` if `block_id` is not in the current layout.
+    pub fn block_visual_info(&self, block_id: usize) -> Option<BlockVisualInfo> {
+        let block = self.flow_layout.blocks.get(&block_id)?;
+        Some(BlockVisualInfo {
+            block_id,
+            y: block.y,
+            height: block.height,
+        })
+    }
+
+    /// Whether a block lives inside any table cell.
+    pub fn is_block_in_table(&self, block_id: usize) -> bool {
+        self.flow_layout.tables.values().any(|table| {
+            table
+                .cell_layouts
+                .iter()
+                .any(|cell| cell.blocks.iter().any(|b| b.block_id == block_id))
+        })
+    }
+
+    /// Scroll so that `position` is visible, placing it roughly one
+    /// third from the top of the viewport. Returns the new offset.
+    pub fn scroll_to_position(&mut self, position: usize) -> f32 {
+        let rect =
+            crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, position);
+        let target_y = rect[1] + self.scroll_offset - self.viewport_height / (3.0 * self.zoom);
+        self.scroll_offset = target_y.max(0.0);
+        self.scroll_offset
+    }
+
+    /// Scroll the minimum amount needed to make the current caret
+    /// visible. Call after arrow-key / click / typing. Returns
+    /// `Some(new_offset)` if the scroll moved, `None` otherwise.
+    pub fn ensure_caret_visible(&mut self) -> Option<f32> {
+        if self.cursors.is_empty() {
+            return None;
+        }
+        let pos = self.cursors[0].position;
+        let rect = crate::render::hit_test::caret_rect(&self.flow_layout, self.scroll_offset, pos);
+        let caret_screen_y = rect[1];
+        let caret_screen_bottom = caret_screen_y + rect[3];
+        let effective_vh = self.viewport_height / self.zoom;
+        let margin = 10.0 / self.zoom;
+        let old_offset = self.scroll_offset;
+
+        if caret_screen_y < 0.0 {
+            self.scroll_offset += caret_screen_y - margin;
+            self.scroll_offset = self.scroll_offset.max(0.0);
+        } else if caret_screen_bottom > effective_vh {
+            self.scroll_offset += caret_screen_bottom - effective_vh + margin;
+        }
+
+        if (self.scroll_offset - old_offset).abs() > 0.001 {
+            Some(self.scroll_offset)
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for DocumentFlow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "text-document")]
+enum FlowItemKind {
+    Block(BlockLayoutParams),
+    Table(TableLayoutParams),
+    Frame(FrameLayoutParams),
+}
+
+/// Rasterize a single glyph into the service's atlas and append a
+/// `GlyphQuad` to the output vec. Shared between
+/// [`DocumentFlow::layout_single_line`] and
+/// [`DocumentFlow::layout_paragraph`] (plus the markup variants).
+fn rasterize_glyph_quad(
+    service: &mut TextFontService,
+    glyph: &ShapedGlyph,
+    run: &ShapedRun,
+    pen_x: f32,
+    baseline: f32,
+    text_color: [f32; 4],
+    quads: &mut Vec<GlyphQuad>,
+) {
+    use crate::atlas::cache::GlyphCacheKey;
+    use crate::atlas::rasterizer::rasterize_glyph;
+
+    if glyph.glyph_id == 0 {
+        return;
+    }
+
+    let entry = match service.font_registry.get(glyph.font_face_id) {
+        Some(e) => e,
+        None => return,
+    };
+
+    let sf = service.scale_factor.max(f32::MIN_POSITIVE);
+    let inv_sf = 1.0 / sf;
+    let physical_size_px = run.size_px * sf;
+    let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, physical_size_px);
+
+    if service.glyph_cache.peek(&cache_key).is_none()
+        && let Some(image) = rasterize_glyph(
+            &mut service.scale_context,
+            &entry.data,
+            entry.face_index,
+            entry.swash_cache_key,
+            glyph.glyph_id,
+            physical_size_px,
+        )
+        && image.width > 0
+        && image.height > 0
+        && let Some(alloc) = service.atlas.allocate(image.width, image.height)
+    {
+        let rect = alloc.rectangle;
+        let atlas_x = rect.min.x as u32;
+        let atlas_y = rect.min.y as u32;
+        if image.is_color {
+            service
+                .atlas
+                .blit_rgba(atlas_x, atlas_y, image.width, image.height, &image.data);
+        } else {
+            service
+                .atlas
+                .blit_mask(atlas_x, atlas_y, image.width, image.height, &image.data);
+        }
+        service.glyph_cache.insert(
+            cache_key,
+            crate::atlas::cache::CachedGlyph {
+                alloc_id: alloc.id,
+                atlas_x,
+                atlas_y,
+                width: image.width,
+                height: image.height,
+                placement_left: image.placement_left,
+                placement_top: image.placement_top,
+                is_color: image.is_color,
+                last_used: 0,
+            },
+        );
+    }
+
+    if let Some(cached) = service.glyph_cache.get(&cache_key) {
+        let logical_w = cached.width as f32 * inv_sf;
+        let logical_h = cached.height as f32 * inv_sf;
+        let logical_left = cached.placement_left as f32 * inv_sf;
+        let logical_top = cached.placement_top as f32 * inv_sf;
+        let screen_x = pen_x + glyph.x_offset + logical_left;
+        let screen_y = baseline - glyph.y_offset - logical_top;
+        let color = if cached.is_color {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            text_color
+        };
+        quads.push(GlyphQuad {
+            screen: [screen_x, screen_y, logical_w, logical_h],
+            atlas: [
+                cached.atlas_x as f32,
+                cached.atlas_y as f32,
+                cached.width as f32,
+                cached.height as f32,
+            ],
+            color,
+        });
+    }
+}
+
+/// Scale all screen-space coordinates in a RenderFrame by `zoom`.
+fn apply_zoom(frame: &mut RenderFrame, zoom: f32) {
+    if (zoom - 1.0).abs() <= f32::EPSILON {
+        return;
+    }
+    for q in &mut frame.glyphs {
+        q.screen[0] *= zoom;
+        q.screen[1] *= zoom;
+        q.screen[2] *= zoom;
+        q.screen[3] *= zoom;
+    }
+    for q in &mut frame.images {
+        q.screen[0] *= zoom;
+        q.screen[1] *= zoom;
+        q.screen[2] *= zoom;
+        q.screen[3] *= zoom;
+    }
+    apply_zoom_decorations(&mut frame.decorations, zoom);
+}
+
+/// Scale all screen-space coordinates in decoration rects by `zoom`.
+fn apply_zoom_decorations(decorations: &mut [DecorationRect], zoom: f32) {
+    if (zoom - 1.0).abs() <= f32::EPSILON {
+        return;
+    }
+    for d in decorations.iter_mut() {
+        d.rect[0] *= zoom;
+        d.rect[1] *= zoom;
+        d.rect[2] *= zoom;
+        d.rect[3] *= zoom;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::block::{BlockLayoutParams, FragmentParams};
+    use crate::layout::paragraph::Alignment;
+    use crate::types::{UnderlineStyle, VerticalAlignment};
+
+    const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
+
+    fn service() -> TextFontService {
+        let mut s = TextFontService::new();
+        let face = s.register_font(NOTO_SANS);
+        s.set_default_font(face, 16.0);
+        s
+    }
+
+    fn block(id: usize, text: &str) -> BlockLayoutParams {
+        BlockLayoutParams {
+            block_id: id,
+            position: 0,
+            text: text.to_string(),
+            fragments: vec![FragmentParams {
+                text: text.to_string(),
+                offset: 0,
+                length: text.len(),
+                font_family: None,
+                font_weight: None,
+                font_bold: None,
+                font_italic: None,
+                font_point_size: None,
+                underline_style: UnderlineStyle::None,
+                overline: false,
+                strikeout: false,
+                is_link: false,
+                letter_spacing: 0.0,
+                word_spacing: 0.0,
+                foreground_color: None,
+                underline_color: None,
+                background_color: None,
+                anchor_href: None,
+                tooltip: None,
+                vertical_alignment: VerticalAlignment::Normal,
+                image_name: None,
+                image_width: 0.0,
+                image_height: 0.0,
+            }],
+            alignment: Alignment::Left,
+            top_margin: 0.0,
+            bottom_margin: 0.0,
+            left_margin: 0.0,
+            right_margin: 0.0,
+            text_indent: 0.0,
+            list_marker: String::new(),
+            list_indent: 0.0,
+            tab_positions: vec![],
+            line_height_multiplier: None,
+            non_breakable_lines: false,
+            checkbox: None,
+            background_color: None,
+        }
+    }
+
+    #[test]
+    fn relayout_block_returns_no_layout_when_never_laid_out() {
+        let svc = service();
+        let mut flow = DocumentFlow::new();
+        flow.set_viewport(400.0, 200.0);
+        let err = flow.relayout_block(&svc, &block(1, "Hello")).unwrap_err();
+        assert_eq!(err, RelayoutError::NoLayout);
+    }
+
+    #[test]
+    fn relayout_block_returns_scale_dirty_after_scale_factor_change() {
+        let mut svc = service();
+        let mut flow = DocumentFlow::new();
+        flow.set_viewport(400.0, 200.0);
+        flow.layout_blocks(&svc, vec![block(1, "Hello")]);
+        assert!(flow.has_layout());
+
+        // Simulate a HiDPI transition on the shared service.
+        svc.set_scale_factor(2.0);
+        assert!(flow.layout_dirty_for_scale(&svc));
+
+        let err = flow
+            .relayout_block(&svc, &block(1, "Hello world"))
+            .unwrap_err();
+        assert_eq!(err, RelayoutError::ScaleDirty);
+    }
+
+    #[test]
+    fn relayout_block_succeeds_after_fresh_layout_post_scale_change() {
+        let mut svc = service();
+        let mut flow = DocumentFlow::new();
+        flow.set_viewport(400.0, 200.0);
+        flow.layout_blocks(&svc, vec![block(1, "Hello")]);
+
+        svc.set_scale_factor(2.0);
+        // Caller is expected to re-run a full layout at the new
+        // scale before issuing incremental updates.
+        flow.layout_blocks(&svc, vec![block(1, "Hello")]);
+        assert!(!flow.layout_dirty_for_scale(&svc));
+
+        // Now the incremental path succeeds.
+        flow.relayout_block(&svc, &block(1, "Hello world"))
+            .expect("relayout_block must succeed after a fresh post-scale layout");
+    }
+}
+
+/// Derive a per-span [`TextFormat`] from a base format and inline
+/// markup attributes (bold / italic).
+fn merge_format(base: &TextFormat, attrs: InlineAttrs) -> TextFormat {
+    let mut fmt = base.clone();
+    if attrs.is_bold() {
+        fmt.font_bold = Some(true);
+        if let Some(w) = fmt.font_weight
+            && w < 600
+        {
+            fmt.font_weight = Some(700);
+        } else if fmt.font_weight.is_none() {
+            fmt.font_weight = Some(700);
+        }
+    }
+    if attrs.is_italic() {
+        fmt.font_italic = Some(true);
+    }
+    fmt
+}

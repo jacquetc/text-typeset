@@ -1,7 +1,5 @@
 mod helpers;
-use helpers::{NOTO_SANS, make_typesetter};
-
-use text_typeset::Typesetter;
+use helpers::{NOTO_SANS, Typesetter, make_typesetter};
 
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::shaping::shaper::{font_metrics_px, shape_text, shape_text_with_buffer};

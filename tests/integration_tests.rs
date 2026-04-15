@@ -2,11 +2,9 @@
 //! These tests verify the full pipeline: TextDocument -> FlowSnapshot -> Typesetter -> RenderFrame.
 
 mod helpers;
-use helpers::{NOTO_SANS, assert_caret_is_real, assert_no_glyph_overlap, make_typesetter};
+use helpers::{NOTO_SANS, Typesetter, assert_caret_is_real, assert_no_glyph_overlap, make_typesetter};
 
 use text_document::TextDocument;
-use text_typeset::Typesetter;
-
 #[test]
 fn plain_text_document_renders_glyphs() {
     let doc = TextDocument::new();

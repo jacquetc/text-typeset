@@ -6,7 +6,12 @@ use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
-use text_typeset::{DecorationKind, RenderFrame, Typesetter, UnderlineStyle, VerticalAlignment};
+use text_typeset::{
+    AtlasSnapshot, BlockVisualInfo, CharacterGeometry, ContentWidthMode, CursorDisplay,
+    DecorationKind, DocumentFlow, FontFaceId, HitTestResult, InlineMarkup, ParagraphResult,
+    RenderFrame, SingleLineResult, TextFontService, TextFormat, UnderlineStyle,
+    VerticalAlignment,
+};
 
 pub const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
 
@@ -240,7 +245,257 @@ pub fn assert_caret_is_real(rect: [f32; 4], label: &str) {
 
 // ── Setup helpers ───────────────────────────────────────────────
 
-/// Typesetter with NotoSans at 16px default, 800x600 viewport.
+// ── Test-only Typesetter façade ─────────────────────────────────
+//
+// text-typeset's public API is deliberately split into a shared
+// `TextFontService` (fonts + glyph atlas + shaper cache) and a
+// per-widget `DocumentFlow` (viewport, layout, cursor, render
+// state). The test suite exercises that split end-to-end by
+// building a fresh service and a fresh flow for every test. This
+// façade exists ONLY in the test module: it holds a service and a
+// flow side by side and forwards every method the old monolithic
+// `Typesetter` used to expose, so the existing tests keep reading
+// naturally without repeating `(service, flow)` boilerplate on
+// every line.
+//
+// **Not public API.** If you're reading this while porting a
+// downstream crate, use `TextFontService` + `DocumentFlow`
+// directly — see the library docs.
+
+/// Test façade that bundles a [`TextFontService`] and a
+/// [`DocumentFlow`] into one struct with the pre-split
+/// `Typesetter` method surface. Fully owned by the test module.
+pub struct Typesetter {
+    pub service: TextFontService,
+    pub flow: DocumentFlow,
+}
+
+impl Typesetter {
+    pub fn new() -> Self {
+        Self {
+            service: TextFontService::new(),
+            flow: DocumentFlow::new(),
+        }
+    }
+
+    // ── Font registration (service-side) ──
+    pub fn register_font(&mut self, data: &[u8]) -> FontFaceId {
+        self.service.register_font(data)
+    }
+    pub fn register_font_as(
+        &mut self,
+        data: &[u8],
+        family: &str,
+        weight: u16,
+        italic: bool,
+    ) -> FontFaceId {
+        self.service.register_font_as(data, family, weight, italic)
+    }
+    pub fn set_default_font(&mut self, face: FontFaceId, size_px: f32) {
+        self.service.set_default_font(face, size_px);
+    }
+    pub fn set_generic_family(&mut self, generic: &str, family: &str) {
+        self.service.set_generic_family(generic, family);
+    }
+    pub fn font_family_name(&self, face_id: FontFaceId) -> Option<String> {
+        self.service.font_family_name(face_id)
+    }
+    pub fn font_registry(&self) -> &text_typeset::font::registry::FontRegistry {
+        self.service.font_registry()
+    }
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.service.set_scale_factor(scale_factor);
+        // The pre-split Typesetter cleared the flow layout on
+        // scale change. After the split the service can no longer
+        // reach into per-widget flows, so tests that poke the
+        // scale factor and then read the flow expect the dirty
+        // check to be applied. Tests that do care re-run their
+        // `layout_*` calls explicitly; tests that don't care
+        // just keep the old (now empty) layout.
+        //
+        // We don't pre-clear here either: the generation counter
+        // on the service already marks the flow as dirty, and
+        // `layout_dirty_for_scale` plus the next layout call
+        // handle the cleanup exactly like production does.
+    }
+    pub fn scale_factor(&self) -> f32 {
+        self.service.scale_factor()
+    }
+    pub fn atlas_snapshot(&mut self, advance_generation: bool) -> AtlasSnapshot<'_> {
+        self.service.atlas_snapshot(advance_generation)
+    }
+
+    // ── Viewport / scroll / zoom (flow-side) ──
+    pub fn set_viewport(&mut self, width: f32, height: f32) {
+        self.flow.set_viewport(width, height);
+    }
+    pub fn set_content_width(&mut self, width: f32) {
+        self.flow.set_content_width(width);
+    }
+    pub fn set_content_width_auto(&mut self) {
+        self.flow.set_content_width_auto();
+    }
+    pub fn layout_width(&self) -> f32 {
+        self.flow.layout_width()
+    }
+    pub fn set_scroll_offset(&mut self, offset: f32) {
+        self.flow.set_scroll_offset(offset);
+    }
+    pub fn content_height(&self) -> f32 {
+        self.flow.content_height()
+    }
+    pub fn max_content_width(&self) -> f32 {
+        self.flow.max_content_width()
+    }
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.flow.set_zoom(zoom);
+    }
+    pub fn zoom(&self) -> f32 {
+        self.flow.zoom()
+    }
+
+    // ── Layout ──
+    #[cfg(feature = "text-document")]
+    pub fn layout_full(&mut self, flow: &text_document::FlowSnapshot) {
+        self.flow.layout_full(&self.service, flow);
+    }
+    pub fn layout_blocks(&mut self, block_params: Vec<BlockLayoutParams>) {
+        self.flow.layout_blocks(&self.service, block_params);
+    }
+    pub fn add_frame(&mut self, params: &FrameLayoutParams) {
+        self.flow.add_frame(&self.service, params);
+    }
+    pub fn add_table(&mut self, params: &TableLayoutParams) {
+        self.flow.add_table(&self.service, params);
+    }
+    pub fn relayout_block(&mut self, params: &BlockLayoutParams) {
+        // Tests that exercise the pre-split Typesetter API
+        // always call this after a prior layout, never across a
+        // scale-factor change. Anything else is a test bug and
+        // should fail loudly rather than silently corrupt the
+        // flow.
+        self.flow
+            .relayout_block(&self.service, params)
+            .expect("relayout_block invariant violated in test");
+    }
+
+    // ── Rendering ──
+    pub fn render(&mut self) -> &RenderFrame {
+        self.flow.render(&mut self.service)
+    }
+    pub fn render_block_only(&mut self, block_id: usize) -> &RenderFrame {
+        self.flow.render_block_only(&mut self.service, block_id)
+    }
+    pub fn render_cursor_only(&mut self) -> &RenderFrame {
+        self.flow.render_cursor_only(&mut self.service)
+    }
+
+    // ── Single-line layout ──
+    pub fn layout_single_line(
+        &mut self,
+        text: &str,
+        format: &TextFormat,
+        max_width: Option<f32>,
+    ) -> SingleLineResult {
+        self.flow
+            .layout_single_line(&mut self.service, text, format, max_width)
+    }
+    pub fn layout_paragraph(
+        &mut self,
+        text: &str,
+        format: &TextFormat,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> ParagraphResult {
+        self.flow
+            .layout_paragraph(&mut self.service, text, format, max_width, max_lines)
+    }
+    pub fn layout_single_line_markup(
+        &mut self,
+        markup: &InlineMarkup,
+        format: &TextFormat,
+        max_width: Option<f32>,
+    ) -> SingleLineResult {
+        self.flow
+            .layout_single_line_markup(&mut self.service, markup, format, max_width)
+    }
+    pub fn layout_paragraph_markup(
+        &mut self,
+        markup: &InlineMarkup,
+        format: &TextFormat,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> ParagraphResult {
+        self.flow.layout_paragraph_markup(
+            &mut self.service,
+            markup,
+            format,
+            max_width,
+            max_lines,
+        )
+    }
+
+    // ── Hit testing & geometry ──
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<HitTestResult> {
+        self.flow.hit_test(x, y)
+    }
+    pub fn character_geometry(
+        &self,
+        block_id: usize,
+        char_start: usize,
+        char_end: usize,
+    ) -> Vec<CharacterGeometry> {
+        self.flow
+            .character_geometry(block_id, char_start, char_end)
+    }
+    pub fn caret_rect(&self, position: usize) -> [f32; 4] {
+        self.flow.caret_rect(position)
+    }
+
+    // ── Cursor & colors ──
+    pub fn set_cursor(&mut self, cursor: &CursorDisplay) {
+        self.flow.set_cursor(cursor);
+    }
+    pub fn set_cursors(&mut self, cursors: &[CursorDisplay]) {
+        self.flow.set_cursors(cursors);
+    }
+    pub fn set_selection_color(&mut self, color: [f32; 4]) {
+        self.flow.set_selection_color(color);
+    }
+    pub fn set_cursor_color(&mut self, color: [f32; 4]) {
+        self.flow.set_cursor_color(color);
+    }
+    pub fn set_text_color(&mut self, color: [f32; 4]) {
+        self.flow.set_text_color(color);
+    }
+
+    // ── Scrolling helpers ──
+    pub fn block_visual_info(&self, block_id: usize) -> Option<BlockVisualInfo> {
+        self.flow.block_visual_info(block_id)
+    }
+    pub fn is_block_in_table(&self, block_id: usize) -> bool {
+        self.flow.is_block_in_table(block_id)
+    }
+    pub fn scroll_to_position(&mut self, position: usize) -> f32 {
+        self.flow.scroll_to_position(position)
+    }
+    pub fn ensure_caret_visible(&mut self) -> Option<f32> {
+        self.flow.ensure_caret_visible()
+    }
+
+    pub fn content_width_mode(&self) -> ContentWidthMode {
+        self.flow.content_width_mode()
+    }
+}
+
+impl Default for Typesetter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Pre-split façade with NotoSans at 16px default and an 800×600
+/// viewport. Uses the test-only `Typesetter` wrapper.
 pub fn make_typesetter() -> Typesetter {
     let mut ts = Typesetter::new();
     let face = ts.register_font(NOTO_SANS);

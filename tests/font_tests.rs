@@ -1,4 +1,5 @@
-use text_typeset::Typesetter;
+mod helpers;
+use helpers::Typesetter;
 
 const NOTO_SANS: &[u8] = include_bytes!("../test-fonts/NotoSans-Variable.ttf");
 

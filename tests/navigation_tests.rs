@@ -10,11 +10,9 @@
 //! - f32::INFINITY no-wrap
 
 mod helpers;
-use helpers::{NOTO_SANS, Rect, assert_caret_is_real, assert_no_glyph_overlap};
+use helpers::{NOTO_SANS, Rect, Typesetter, assert_caret_is_real, assert_no_glyph_overlap};
 
 use text_document::{MoveMode, MoveOperation, TextDocument};
-use text_typeset::Typesetter;
-
 // ── Markdown document ──────────────────────────────────────────
 
 /// Rich document containing every element type with inline formatting.

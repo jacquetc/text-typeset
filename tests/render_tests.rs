@@ -1,11 +1,11 @@
 mod helpers;
-use helpers::{NOTO_SANS, assert_no_glyph_overlap, make_block, make_cell, make_typesetter};
+use helpers::{NOTO_SANS, Typesetter, assert_no_glyph_overlap, make_block, make_cell, make_typesetter};
 
 use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
 use text_typeset::layout::frame::{FrameBorderStyle, FrameLayoutParams, FramePosition};
 use text_typeset::layout::paragraph::Alignment;
 use text_typeset::layout::table::{CellLayoutParams, TableLayoutParams};
-use text_typeset::{DecorationKind, Typesetter, UnderlineStyle, VerticalAlignment};
+use text_typeset::{DecorationKind, UnderlineStyle, VerticalAlignment};
 
 #[test]
 fn full_pipeline_produces_glyph_quads() {

@@ -16,7 +16,9 @@ use crate::layout::table::{CellLayoutParams, TableLayoutParams};
 const DEFAULT_LIST_INDENT: f32 = 24.0;
 const INDENT_PER_LEVEL: f32 = 24.0;
 
-/// Convert a FlowSnapshot into layout params that can be fed to the Typesetter.
+/// Convert a FlowSnapshot into layout params that can be fed to a [`DocumentFlow`].
+///
+/// [`DocumentFlow`]: crate::DocumentFlow
 pub fn convert_flow(flow: &FlowSnapshot) -> FlowElements {
     let mut blocks = Vec::new();
     let mut tables = Vec::new();

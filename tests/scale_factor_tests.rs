@@ -5,8 +5,7 @@
 
 mod helpers;
 
-use helpers::{NOTO_SANS, make_block, make_typesetter};
-use text_typeset::Typesetter;
+use helpers::{NOTO_SANS, Typesetter, make_block, make_typesetter};
 use text_typeset::font::resolve::resolve_font;
 use text_typeset::layout::block::layout_block;
 use text_typeset::layout::flow::FlowLayout;
@@ -270,20 +269,26 @@ fn changing_scale_factor_resets_atlas_and_relayout_repopulates() {
     let before_atlas_w = before.atlas_width;
     assert!(before_glyphs > 0);
 
-    // Switch sf: atlas is reset, layout is cleared.
+    // Switch sf: the service clears its glyph cache and atlas in
+    // place, and bumps its scale_generation counter. Per-widget
+    // flow layouts are NOT touched (the service no longer reaches
+    // into them). Every flow stamps the service's current
+    // generation during its last `layout_*` call, so the flow can
+    // report whether it is now stale via
+    // `DocumentFlow::layout_dirty_for_scale`.
     ts.set_scale_factor(2.0);
-
-    // With no layout yet, a render should produce no block glyphs.
-    let after_switch = ts.render();
-    assert_eq!(
-        after_switch.glyphs.len(),
-        0,
-        "flow layout should be cleared after scale_factor change"
+    assert!(
+        ts.flow.layout_dirty_for_scale(&ts.service),
+        "flow must flag stale layout after scale_factor change"
     );
 
-    // Re-layout and render; glyphs must reappear, and their atlas rects
-    // should be ~2x larger than before.
+    // Re-layout against the new scale factor — this is the
+    // caller's contract after a HiDPI change. The flow snaps back
+    // to "up to date" and the relayouted glyphs land in a fresh
+    // atlas.
     ts.layout_blocks(vec![make_block(1, TEXT)]);
+    assert!(!ts.flow.layout_dirty_for_scale(&ts.service));
+
     let after_glyphs_and_atlas: Vec<_> = ts
         .render()
         .glyphs
@@ -293,7 +298,7 @@ fn changing_scale_factor_resets_atlas_and_relayout_repopulates() {
     assert_eq!(after_glyphs_and_atlas.len(), before_glyphs);
 
     // The atlas must be marked dirty by the fresh rasterizations.
-    // (It is either the same initial atlas or has grown; either way its
-    // width is at least the initial 512.)
+    // (It is either the same initial atlas or has grown; either
+    // way its width is at least the initial 512.)
     assert!(before_atlas_w >= 512);
 }

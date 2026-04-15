@@ -266,6 +266,33 @@ pub struct SingleLineResult {
     pub baseline: f32,
     /// GPU-ready glyph quads, positioned at y=0 (no scroll offset).
     pub glyphs: Vec<GlyphQuad>,
+    /// Per-span bounding rectangles for markup-aware layout
+    /// ([`crate::Typesetter::layout_single_line_markup`]). Empty for
+    /// the plain-text layout path.
+    pub spans: Vec<LaidOutSpan>,
+}
+
+/// A single laid-out span produced by the markup-aware layout path.
+///
+/// When a link wraps across two paragraph lines, it produces two
+/// `LaidOutSpan` entries sharing the same URL and byte_range but with
+/// distinct `line_index` / `rect`.
+#[derive(Debug, Clone)]
+pub struct LaidOutSpan {
+    pub kind: LaidOutSpanKind,
+    /// Which wrapped line this span piece lives on (0 for single-line).
+    pub line_index: usize,
+    /// Local-space rect: `[x, y, width, height]`, same space as glyph quads.
+    pub rect: [f32; 4],
+    /// Byte range into the original markup source.
+    pub byte_range: std::ops::Range<usize>,
+}
+
+/// Kind discriminator for [`LaidOutSpan`].
+#[derive(Debug, Clone)]
+pub enum LaidOutSpanKind {
+    Text,
+    Link { url: String },
 }
 
 /// Result of [`crate::Typesetter::layout_paragraph`].
@@ -287,8 +314,15 @@ pub struct ParagraphResult {
     pub baseline_first: f32,
     /// Number of lines actually emitted (respects `max_lines` when set).
     pub line_count: usize,
+    /// Line height (single line's ascent + descent + leading), in pixels.
+    /// Useful for callers that need to reason about per-line geometry.
+    pub line_height: f32,
     /// GPU-ready glyph quads in paragraph-local coordinates.
     pub glyphs: Vec<GlyphQuad>,
+    /// Per-span bounding rectangles for markup-aware layout
+    /// ([`crate::Typesetter::layout_paragraph_markup`]). Empty for
+    /// the plain-text layout path.
+    pub spans: Vec<LaidOutSpan>,
 }
 
 impl RenderFrame {
