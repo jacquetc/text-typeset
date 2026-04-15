@@ -1581,6 +1581,26 @@ fn apply_zoom_decorations(decorations: &mut [DecorationRect], zoom: f32) {
     }
 }
 
+/// Derive a per-span [`TextFormat`] from a base format and inline
+/// markup attributes (bold / italic).
+fn merge_format(base: &TextFormat, attrs: InlineAttrs) -> TextFormat {
+    let mut fmt = base.clone();
+    if attrs.is_bold() {
+        fmt.font_bold = Some(true);
+        if let Some(w) = fmt.font_weight
+            && w < 600
+        {
+            fmt.font_weight = Some(700);
+        } else if fmt.font_weight.is_none() {
+            fmt.font_weight = Some(700);
+        }
+    }
+    if attrs.is_italic() {
+        fmt.font_italic = Some(true);
+    }
+    fmt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1687,24 +1707,4 @@ mod tests {
         flow.relayout_block(&svc, &block(1, "Hello world"))
             .expect("relayout_block must succeed after a fresh post-scale layout");
     }
-}
-
-/// Derive a per-span [`TextFormat`] from a base format and inline
-/// markup attributes (bold / italic).
-fn merge_format(base: &TextFormat, attrs: InlineAttrs) -> TextFormat {
-    let mut fmt = base.clone();
-    if attrs.is_bold() {
-        fmt.font_bold = Some(true);
-        if let Some(w) = fmt.font_weight
-            && w < 600
-        {
-            fmt.font_weight = Some(700);
-        } else if fmt.font_weight.is_none() {
-            fmt.font_weight = Some(700);
-        }
-    }
-    if attrs.is_italic() {
-        fmt.font_italic = Some(true);
-    }
-    fmt
 }

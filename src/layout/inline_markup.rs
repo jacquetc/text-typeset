@@ -149,42 +149,42 @@ fn parse_spans(source: &str, base_offset: usize) -> Vec<InlineSpan> {
         }
 
         // Bold **…**
-        if b == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
-            if let Some(close) = find_marker(source, i + 2, "**")
-                && close > i + 2
-            {
-                flush_text(&mut out, &mut text_buf, text_start, i);
-                let inner = &source[i + 2..close];
-                let mut inner_spans = parse_spans(inner, base_offset + i + 2);
-                for sp in inner_spans.iter_mut() {
-                    sp.attrs |= InlineAttrs::BOLD;
-                }
-                out.extend(inner_spans);
-                i = close + 2;
-                text_start = i;
-                continue;
+        if b == b'*'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'*'
+            && let Some(close) = find_marker(source, i + 2, "**")
+            && close > i + 2
+        {
+            flush_text(&mut out, &mut text_buf, text_start, i);
+            let inner = &source[i + 2..close];
+            let mut inner_spans = parse_spans(inner, base_offset + i + 2);
+            for sp in inner_spans.iter_mut() {
+                sp.attrs |= InlineAttrs::BOLD;
             }
+            out.extend(inner_spans);
+            i = close + 2;
+            text_start = i;
+            continue;
         }
 
         // Italic *…*
-        if b == b'*' {
-            if let Some(close) = find_marker(source, i + 1, "*")
-                && close > i + 1
-            {
-                // Don't consume a `*` that's actually the start of a `**`.
-                let close_is_double = close + 1 < bytes.len() && bytes[close + 1] == b'*';
-                if !close_is_double {
-                    flush_text(&mut out, &mut text_buf, text_start, i);
-                    let inner = &source[i + 1..close];
-                    let mut inner_spans = parse_spans(inner, base_offset + i + 1);
-                    for sp in inner_spans.iter_mut() {
-                        sp.attrs |= InlineAttrs::ITALIC;
-                    }
-                    out.extend(inner_spans);
-                    i = close + 1;
-                    text_start = i;
-                    continue;
+        if b == b'*'
+            && let Some(close) = find_marker(source, i + 1, "*")
+            && close > i + 1
+        {
+            // Don't consume a `*` that's actually the start of a `**`.
+            let close_is_double = close + 1 < bytes.len() && bytes[close + 1] == b'*';
+            if !close_is_double {
+                flush_text(&mut out, &mut text_buf, text_start, i);
+                let inner = &source[i + 1..close];
+                let mut inner_spans = parse_spans(inner, base_offset + i + 1);
+                for sp in inner_spans.iter_mut() {
+                    sp.attrs |= InlineAttrs::ITALIC;
                 }
+                out.extend(inner_spans);
+                i = close + 1;
+                text_start = i;
+                continue;
             }
         }
 
