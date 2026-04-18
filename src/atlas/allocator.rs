@@ -30,9 +30,15 @@ impl GlyphAtlas {
         }
     }
 
+    /// Allocate a region for a glyph of `width`×`height` pixels. The
+    /// returned allocation reserves a 1-pixel gutter on the right and
+    /// bottom so adjacent glyphs can't bleed into each other under
+    /// float-precision UV rounding. Callers still blit only the
+    /// requested `width`×`height` pixels at `rect.min`; the extra
+    /// column/row of transparent pixels is the safety margin.
     pub fn allocate(&mut self, width: u32, height: u32) -> Option<Allocation> {
-        let size = size2(width as i32, height as i32);
-        if let Some(alloc) = self.allocator.allocate(size) {
+        let padded = size2(width as i32 + 1, height as i32 + 1);
+        if let Some(alloc) = self.allocator.allocate(padded) {
             return Some(alloc);
         }
         // Try growing the atlas
@@ -42,7 +48,7 @@ impl GlyphAtlas {
             return None; // Already at max size
         }
         self.grow(new_w as u32, new_h as u32);
-        self.allocator.allocate(size)
+        self.allocator.allocate(padded)
     }
 
     pub fn deallocate(&mut self, id: AllocId) {
