@@ -101,6 +101,7 @@ fn apply_glyph_fallback(
             face_index: fallback_entry.face_index,
             swash_cache_key: fallback_entry.swash_cache_key,
             scale_factor: primary.scale_factor,
+            weight: primary.weight,
         };
 
         let char_str = &text[byte_offset..byte_offset + ch.len_utf8()];
@@ -187,6 +188,7 @@ pub fn shape_text_directed(
     Some(ShapedRun {
         font_face_id: resolved.font_face_id,
         size_px: resolved.size_px,
+        weight: resolved.weight,
         glyphs,
         advance_width: total_advance,
         text_range: text_offset..text_offset + text.len(),
@@ -258,6 +260,7 @@ pub fn shape_text_with_buffer(
     let run = ShapedRun {
         font_face_id: resolved.font_face_id,
         size_px: resolved.size_px,
+        weight: resolved.weight,
         glyphs,
         advance_width: total_advance,
         text_range: text_offset..text_offset + text.len(),

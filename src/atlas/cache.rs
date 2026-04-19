@@ -9,6 +9,10 @@ pub struct GlyphCacheKey {
     pub font_face_id: FontFaceId,
     pub glyph_id: u16,
     pub size_bits: u32,
+    /// Font weight (variation axis) so that e.g. Inter Regular and Inter
+    /// Bold produce separate cache entries even though they share the
+    /// same `font_face_id` and `glyph_id` in a variable font.
+    pub weight: u32,
 }
 
 impl GlyphCacheKey {
@@ -17,6 +21,16 @@ impl GlyphCacheKey {
             font_face_id,
             glyph_id,
             size_bits: size_px.to_bits(),
+            weight: 400,
+        }
+    }
+
+    pub fn with_weight(font_face_id: FontFaceId, glyph_id: u16, size_px: f32, weight: u32) -> Self {
+        Self {
+            font_face_id,
+            glyph_id,
+            size_bits: size_px.to_bits(),
+            weight,
         }
     }
 }
@@ -124,5 +138,19 @@ impl GlyphCache {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Mark multiple glyphs as used in the current generation without
+    /// returning their data. Used by callers that cache glyph output
+    /// externally (e.g. per-widget paint caches) and need to keep the
+    /// glyphs alive in the atlas even though they don't re-measure them
+    /// every frame.
+    pub fn touch(&mut self, keys: &[GlyphCacheKey]) {
+        let current = self.generation;
+        for key in keys {
+            if let Some(entry) = self.entries.get_mut(key) {
+                entry.last_used = current;
+            }
+        }
     }
 }

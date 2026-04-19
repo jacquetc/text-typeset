@@ -19,6 +19,10 @@ pub struct ShapedGlyph {
 pub struct ShapedRun {
     pub font_face_id: FontFaceId,
     pub size_px: f32,
+    /// Resolved font weight (CSS 100–900). Propagated to the glyph
+    /// rasterizer so variable-font `wght` axis is set correctly and
+    /// the glyph cache key distinguishes different weights.
+    pub weight: u16,
     pub glyphs: Vec<ShapedGlyph>,
     pub advance_width: f32,
     pub text_range: Range<usize>,

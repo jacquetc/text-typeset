@@ -59,6 +59,11 @@ pub struct GlyphQuad {
     /// For normal text glyphs, this is the text color (default black).
     /// For color emoji, this is `[1, 1, 1, 1]` (color is baked into the atlas).
     pub color: [f32; 4],
+    /// `true` if the atlas region for this glyph holds a pre-multiplied
+    /// RGBA color bitmap (color emoji via COLR/CBDT/sbix). The renderer
+    /// must sample `texture.rgb` directly instead of using the texture
+    /// as an alpha mask tinted by [`color`](Self::color).
+    pub is_color: bool,
 }
 
 /// An inline image placeholder.
@@ -264,8 +269,20 @@ pub struct SingleLineResult {
     pub height: f32,
     /// Distance from the top of the line to the baseline, in pixels.
     pub baseline: f32,
+    /// Distance from baseline to the top of the underline, in logical
+    /// pixels. Positive = below the baseline. Sourced from the primary
+    /// font's `post` table.
+    pub underline_offset: f32,
+    /// Underline line thickness in logical pixels. Sourced from the
+    /// primary font's stroke size.
+    pub underline_thickness: f32,
     /// GPU-ready glyph quads, positioned at y=0 (no scroll offset).
     pub glyphs: Vec<GlyphQuad>,
+    /// Per-glyph cache keys, parallel to `glyphs`. Callers that cache
+    /// glyph output externally should pass these back to
+    /// [`TextFontService::touch_glyphs`] each frame to prevent the
+    /// atlas from evicting still-visible glyphs.
+    pub glyph_keys: Vec<crate::atlas::cache::GlyphCacheKey>,
     /// Per-span bounding rectangles for markup-aware layout
     /// ([`crate::Typesetter::layout_single_line_markup`]). Empty for
     /// the plain-text layout path.
@@ -317,8 +334,18 @@ pub struct ParagraphResult {
     /// Line height (single line's ascent + descent + leading), in pixels.
     /// Useful for callers that need to reason about per-line geometry.
     pub line_height: f32,
+    /// Distance from baseline to the top of the underline, in logical
+    /// pixels. Positive = below the baseline. Sourced from the primary
+    /// font's `post` table.
+    pub underline_offset: f32,
+    /// Underline line thickness in logical pixels. Sourced from the
+    /// primary font's stroke size.
+    pub underline_thickness: f32,
     /// GPU-ready glyph quads in paragraph-local coordinates.
     pub glyphs: Vec<GlyphQuad>,
+    /// Per-glyph cache keys, parallel to `glyphs`. See
+    /// [`SingleLineResult::glyph_keys`].
+    pub glyph_keys: Vec<crate::atlas::cache::GlyphCacheKey>,
     /// Per-span bounding rectangles for markup-aware layout
     /// ([`crate::Typesetter::layout_paragraph_markup`]). Empty for
     /// the plain-text layout path.

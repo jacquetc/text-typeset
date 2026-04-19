@@ -292,6 +292,15 @@ impl TextFontService {
         }
     }
 
+    /// Mark the given glyph cache keys as used in the current
+    /// generation, preventing them from being evicted. Use this when
+    /// glyph quads are cached externally (e.g. per-widget paint
+    /// caches) and the normal `rasterize_glyph_quad` → `get()` path
+    /// is skipped.
+    pub fn touch_glyphs(&mut self, keys: &[crate::atlas::cache::GlyphCacheKey]) {
+        self.glyph_cache.touch(keys);
+    }
+
     /// True if the atlas has pending pixel changes since the last
     /// upload. The atlas is marked clean after every `render()` that
     /// copies pixels into its `RenderFrame`; this accessor exposes

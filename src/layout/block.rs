@@ -137,6 +137,7 @@ pub fn layout_block(
             let run = ShapedRun {
                 font_face_id: crate::types::FontFaceId(0),
                 size_px: 0.0,
+                weight: 400,
                 glyphs: vec![image_glyph],
                 advance_width: frag.image_width,
                 text_range: frag.offset..frag.offset + frag.text.len(),
@@ -388,6 +389,7 @@ fn get_default_metrics(registry: &FontRegistry, scale_factor: f32) -> FontMetric
                 .map(|e| e.swash_cache_key)
                 .unwrap_or_default(),
             scale_factor,
+            weight: 400,
         };
         if let Some(m) = font_metrics_px(registry, &resolved) {
             return m;

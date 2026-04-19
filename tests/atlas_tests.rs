@@ -151,6 +151,7 @@ mod rasterizer {
             entry.swash_cache_key,
             glyph_id,
             16.0,
+            400,
         );
 
         assert!(image.is_some(), "rasterization should succeed for 'A'");
@@ -177,6 +178,7 @@ mod rasterizer {
             entry.swash_cache_key,
             glyph_id,
             24.0,
+            400,
         )
         .unwrap();
 
@@ -208,6 +210,7 @@ mod rasterizer {
             entry.swash_cache_key,
             glyph_id,
             12.0,
+            400,
         )
         .unwrap();
         let large = rasterize_glyph(
@@ -217,6 +220,7 @@ mod rasterizer {
             entry.swash_cache_key,
             glyph_id,
             48.0,
+            400,
         )
         .unwrap();
 
@@ -247,6 +251,7 @@ mod rasterizer {
             entry.swash_cache_key,
             glyph_id,
             16.0,
+            400,
         );
 
         // Space may rasterize to None (no outline) or to an empty image

@@ -415,6 +415,7 @@ fn extract_sub_run(
     let sub_run = ShapedRun {
         font_face_id: run.font_face_id,
         size_px: run.size_px,
+        weight: run.weight,
         glyphs: sub_glyphs,
         advance_width: advance,
         text_range: run.text_range.clone(),

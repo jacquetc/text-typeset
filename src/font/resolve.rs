@@ -12,6 +12,11 @@ pub struct ResolvedFont {
     /// divided by `scale_factor` to produce logical-pixel metrics,
     /// so downstream layout stays in logical space.
     pub scale_factor: f32,
+    /// Resolved font weight (CSS-style 100–900). Used as the `wght`
+    /// variation axis when rasterizing variable fonts and as part of
+    /// the glyph cache key so different weights produce separate
+    /// rasterized bitmaps.
+    pub weight: u16,
 }
 
 /// Resolve a font from text formatting parameters.
@@ -47,6 +52,7 @@ pub fn resolve_font(
             face_index: entry.face_index,
             swash_cache_key: entry.swash_cache_key,
             scale_factor,
+            weight,
         });
     }
 
@@ -63,6 +69,7 @@ pub fn resolve_font(
             face_index: variant_entry.face_index,
             swash_cache_key: variant_entry.swash_cache_key,
             scale_factor,
+            weight,
         });
     }
     let entry = registry.get(default_id)?;
@@ -72,6 +79,7 @@ pub fn resolve_font(
         face_index: entry.face_index,
         swash_cache_key: entry.swash_cache_key,
         scale_factor,
+        weight,
     })
 }
 

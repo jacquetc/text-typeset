@@ -653,7 +653,7 @@ fn render_run_glyphs(
             }
         };
 
-        let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, physical_size_px);
+        let cache_key = GlyphCacheKey::with_weight(glyph.font_face_id, glyph.glyph_id, physical_size_px, run.weight as u32);
         ensure_glyph_cached(
             &cache_key,
             cache,
@@ -663,6 +663,7 @@ fn render_run_glyphs(
             entry.face_index,
             entry.swash_cache_key,
             physical_size_px,
+            run.weight as u32,
         );
         if let Some(cached) = cache.get(&cache_key) {
             // CachedGlyph stores physical dims; convert to logical for the
@@ -688,6 +689,7 @@ fn render_run_glyphs(
                     cached.height as f32,
                 ],
                 color,
+                is_color: cached.is_color,
             });
         }
         pen_x += glyph.x_advance;
@@ -705,6 +707,7 @@ fn ensure_glyph_cached(
     face_index: u32,
     swash_cache_key: swash::CacheKey,
     size_px: f32,
+    font_weight: u32,
 ) {
     if cache.peek(key).is_some() {
         return;
@@ -717,6 +720,7 @@ fn ensure_glyph_cached(
         swash_cache_key,
         key.glyph_id,
         size_px,
+        font_weight,
     ) {
         Some(img) => img,
         None => return,

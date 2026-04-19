@@ -732,7 +732,10 @@ impl DocumentFlow {
             width: 0.0,
             height: 0.0,
             baseline: 0.0,
+            underline_offset: 0.0,
+            underline_thickness: 0.0,
             glyphs: Vec::new(),
+            glyph_keys: Vec::new(),
             spans: Vec::new(),
         };
 
@@ -811,6 +814,7 @@ impl DocumentFlow {
         let text_color = format.color.unwrap_or(self.text_color);
         let glyph_capacity: usize = runs.iter().map(|r| r.glyphs.len()).sum();
         let mut quads = Vec::with_capacity(glyph_capacity + 1);
+        let mut keys = Vec::with_capacity(glyph_capacity + 1);
         let mut pen_x = 0.0f32;
         let mut emitted = 0usize;
 
@@ -821,7 +825,7 @@ impl DocumentFlow {
                 {
                     break 'emit;
                 }
-                rasterize_glyph_quad(service, glyph, run, pen_x, baseline, text_color, &mut quads);
+                rasterize_glyph_quad(service, glyph, run, pen_x, baseline, text_color, &mut quads, &mut keys);
                 pen_x += glyph.x_advance;
                 emitted += 1;
             }
@@ -830,7 +834,7 @@ impl DocumentFlow {
         if let Some(ref e_run) = ellipsis_run {
             for glyph in &e_run.glyphs {
                 rasterize_glyph_quad(
-                    service, glyph, e_run, pen_x, baseline, text_color, &mut quads,
+                    service, glyph, e_run, pen_x, baseline, text_color, &mut quads, &mut keys,
                 );
                 pen_x += glyph.x_advance;
             }
@@ -840,7 +844,10 @@ impl DocumentFlow {
             width: final_width,
             height: line_height,
             baseline,
+            underline_offset: metrics.underline_offset,
+            underline_thickness: metrics.stroke_size,
             glyphs: quads,
+            glyph_keys: keys,
             spans: Vec::new(),
         }
     }
@@ -869,7 +876,10 @@ impl DocumentFlow {
             baseline_first: 0.0,
             line_count: 0,
             line_height: 0.0,
+            underline_offset: 0.0,
+            underline_thickness: 0.0,
             glyphs: Vec::new(),
+            glyph_keys: Vec::new(),
             spans: Vec::new(),
         };
 
@@ -923,6 +933,7 @@ impl DocumentFlow {
 
         let text_color = format.color.unwrap_or(self.text_color);
         let mut quads: Vec<GlyphQuad> = Vec::new();
+        let mut keys: Vec<crate::atlas::cache::GlyphCacheKey> = Vec::new();
         let mut y_top = 0.0f32;
         let mut max_line_width = 0.0f32;
         let baseline_first = metrics.ascent;
@@ -937,7 +948,7 @@ impl DocumentFlow {
                 let run_copy = run.shaped_run.clone();
                 for glyph in &run_copy.glyphs {
                     rasterize_glyph_quad(
-                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut quads,
+                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut quads, &mut keys,
                     );
                     pen_x += glyph.x_advance;
                 }
@@ -952,7 +963,10 @@ impl DocumentFlow {
             baseline_first,
             line_count,
             line_height,
+            underline_offset: metrics.underline_offset,
+            underline_thickness: metrics.stroke_size,
             glyphs: quads,
+            glyph_keys: keys,
             spans: Vec::new(),
         }
     }
@@ -974,7 +988,10 @@ impl DocumentFlow {
                 width: 0.0,
                 height: 0.0,
                 baseline: 0.0,
+                underline_offset: 0.0,
+                underline_thickness: 0.0,
                 glyphs: Vec::new(),
+                glyph_keys: Vec::new(),
                 spans: Vec::new(),
             };
         }
@@ -989,7 +1006,10 @@ impl DocumentFlow {
                         width: 0.0,
                         height: 0.0,
                         baseline: 0.0,
+                        underline_offset: 0.0,
+                        underline_thickness: 0.0,
                         glyphs: Vec::new(),
+                        glyph_keys: Vec::new(),
                         spans: Vec::new(),
                     }
                 } else {
@@ -1008,6 +1028,14 @@ impl DocumentFlow {
             .iter()
             .map(|(r, _)| r.baseline)
             .fold(0.0f32, f32::max);
+        // Carry underline metrics from the first non-empty span. Spans may
+        // use different fonts but a single line only has one underline, so
+        // the first span wins.
+        let (underline_offset, underline_thickness) = per_span
+            .iter()
+            .map(|(r, _)| (r.underline_offset, r.underline_thickness))
+            .find(|(_, t)| *t > 0.0)
+            .unwrap_or((0.0, 0.0));
 
         let truncate = match max_width {
             Some(mw) if total_width > mw => Some(mw),
@@ -1015,6 +1043,7 @@ impl DocumentFlow {
         };
 
         let mut glyphs: Vec<GlyphQuad> = Vec::new();
+        let mut all_keys: Vec<crate::atlas::cache::GlyphCacheKey> = Vec::new();
         let mut spans_out: Vec<LaidOutSpan> = Vec::new();
         let mut pen_x: f32 = 0.0;
         let effective_width = truncate.unwrap_or(total_width);
@@ -1036,7 +1065,7 @@ impl DocumentFlow {
                 continue;
             }
 
-            for g in &r.glyphs {
+            for (gi, g) in r.glyphs.iter().enumerate() {
                 let g_right = pen_x + g.screen[0] + g.screen[2];
                 if g_right > effective_width + 0.5 {
                     break;
@@ -1044,6 +1073,9 @@ impl DocumentFlow {
                 let mut gq = g.clone();
                 gq.screen[0] += pen_x;
                 glyphs.push(gq);
+                if let Some(k) = r.glyph_keys.get(gi) {
+                    all_keys.push(*k);
+                }
             }
 
             spans_out.push(LaidOutSpan {
@@ -1067,7 +1099,10 @@ impl DocumentFlow {
             width: effective_width,
             height: line_height,
             baseline,
+            underline_offset,
+            underline_thickness,
             glyphs,
+            glyph_keys: all_keys,
             spans: spans_out,
         }
     }
@@ -1090,7 +1125,10 @@ impl DocumentFlow {
             baseline_first: 0.0,
             line_count: 0,
             line_height: 0.0,
+            underline_offset: 0.0,
+            underline_thickness: 0.0,
             glyphs: Vec::new(),
+            glyph_keys: Vec::new(),
             spans: Vec::new(),
         };
 
@@ -1181,6 +1219,7 @@ impl DocumentFlow {
 
         let text_color = format.color.unwrap_or(self.text_color);
         let mut glyphs_out: Vec<GlyphQuad> = Vec::new();
+        let mut keys_out: Vec<crate::atlas::cache::GlyphCacheKey> = Vec::new();
         let mut spans_out: Vec<LaidOutSpan> = Vec::new();
         let line_height = metrics.ascent + metrics.descent + metrics.leading;
         let mut y_top: f32 = 0.0;
@@ -1205,6 +1244,7 @@ impl DocumentFlow {
                         baseline_y,
                         text_color,
                         &mut glyphs_out,
+                        &mut keys_out,
                     );
                     pen_x += glyph.x_advance;
                 }
@@ -1231,7 +1271,10 @@ impl DocumentFlow {
             baseline_first,
             line_count,
             line_height,
+            underline_offset: metrics.underline_offset,
+            underline_thickness: metrics.stroke_size,
             glyphs: glyphs_out,
+            glyph_keys: keys_out,
             spans: spans_out,
         }
     }
@@ -1464,6 +1507,7 @@ fn rasterize_glyph_quad(
     baseline: f32,
     text_color: [f32; 4],
     quads: &mut Vec<GlyphQuad>,
+    glyph_keys: &mut Vec<crate::atlas::cache::GlyphCacheKey>,
 ) {
     use crate::atlas::cache::GlyphCacheKey;
     use crate::atlas::rasterizer::rasterize_glyph;
@@ -1480,7 +1524,7 @@ fn rasterize_glyph_quad(
     let sf = service.scale_factor.max(f32::MIN_POSITIVE);
     let inv_sf = 1.0 / sf;
     let physical_size_px = run.size_px * sf;
-    let cache_key = GlyphCacheKey::new(glyph.font_face_id, glyph.glyph_id, physical_size_px);
+    let cache_key = GlyphCacheKey::with_weight(glyph.font_face_id, glyph.glyph_id, physical_size_px, run.weight as u32);
 
     if service.glyph_cache.peek(&cache_key).is_none()
         && let Some(image) = rasterize_glyph(
@@ -1490,6 +1534,7 @@ fn rasterize_glyph_quad(
             entry.swash_cache_key,
             glyph.glyph_id,
             physical_size_px,
+            run.weight as u32,
         )
         && image.width > 0
         && image.height > 0
@@ -1544,7 +1589,9 @@ fn rasterize_glyph_quad(
                 cached.height as f32,
             ],
             color,
+            is_color: cached.is_color,
         });
+        glyph_keys.push(cache_key);
     }
 }
 
