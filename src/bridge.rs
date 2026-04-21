@@ -322,13 +322,10 @@ fn parse_css_color(s: &str) -> Option<[f32; 4]> {
     }
 
     // rgb(r, g, b) and rgba(r, g, b, a)
-    let inner = if let Some(inner) = s.strip_prefix("rgba(").and_then(|s| s.strip_suffix(')')) {
-        inner
-    } else if let Some(inner) = s.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
-        inner
-    } else {
-        return None;
-    };
+    let inner = s
+        .strip_prefix("rgba(")
+        .and_then(|s| s.strip_suffix(')'))
+        .or_else(|| s.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')))?;
 
     let parts: Vec<&str> = inner.split(',').collect();
     match parts.len() {

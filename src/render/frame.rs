@@ -653,7 +653,12 @@ fn render_run_glyphs(
             }
         };
 
-        let cache_key = GlyphCacheKey::with_weight(glyph.font_face_id, glyph.glyph_id, physical_size_px, run.weight as u32);
+        let cache_key = GlyphCacheKey::with_weight(
+            glyph.font_face_id,
+            glyph.glyph_id,
+            physical_size_px,
+            run.weight as u32,
+        );
         ensure_glyph_cached(
             &cache_key,
             cache,

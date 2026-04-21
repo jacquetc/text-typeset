@@ -825,7 +825,9 @@ impl DocumentFlow {
                 {
                     break 'emit;
                 }
-                rasterize_glyph_quad(service, glyph, run, pen_x, baseline, text_color, &mut quads, &mut keys);
+                rasterize_glyph_quad(
+                    service, glyph, run, pen_x, baseline, text_color, &mut quads, &mut keys,
+                );
                 pen_x += glyph.x_advance;
                 emitted += 1;
             }
@@ -948,7 +950,8 @@ impl DocumentFlow {
                 let run_copy = run.shaped_run.clone();
                 for glyph in &run_copy.glyphs {
                     rasterize_glyph_quad(
-                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut quads, &mut keys,
+                        service, glyph, &run_copy, pen_x, baseline_y, text_color, &mut quads,
+                        &mut keys,
                     );
                     pen_x += glyph.x_advance;
                 }
@@ -1499,6 +1502,7 @@ enum FlowItemKind {
 /// `GlyphQuad` to the output vec. Shared between
 /// [`DocumentFlow::layout_single_line`] and
 /// [`DocumentFlow::layout_paragraph`] (plus the markup variants).
+#[allow(clippy::too_many_arguments)]
 fn rasterize_glyph_quad(
     service: &mut TextFontService,
     glyph: &ShapedGlyph,
@@ -1524,7 +1528,12 @@ fn rasterize_glyph_quad(
     let sf = service.scale_factor.max(f32::MIN_POSITIVE);
     let inv_sf = 1.0 / sf;
     let physical_size_px = run.size_px * sf;
-    let cache_key = GlyphCacheKey::with_weight(glyph.font_face_id, glyph.glyph_id, physical_size_px, run.weight as u32);
+    let cache_key = GlyphCacheKey::with_weight(
+        glyph.font_face_id,
+        glyph.glyph_id,
+        physical_size_px,
+        run.weight as u32,
+    );
 
     if service.glyph_cache.peek(&cache_key).is_none()
         && let Some(image) = rasterize_glyph(
