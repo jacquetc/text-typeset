@@ -395,6 +395,37 @@ fn flow_relayout_block_shifts_subsequent() {
 }
 
 #[test]
+fn flow_relayout_block_shifts_subsequent_positions() {
+    // Cutting chars from a non-last paragraph must also shift the document
+    // character positions of subsequent blocks — otherwise hit_test reports
+    // stale positions and the caret drifts by the number of chars cut.
+    let ts = make_typesetter();
+    let mut flow = FlowLayout::new();
+
+    // Emulate "First\nSecond\nThird": blocks at positions 0, 6, 13.
+    let blocks = vec![
+        make_block_at(1, 0, "First"),
+        make_block_at(2, 6, "Second"),
+        make_block_at(3, 13, "Third"),
+    ];
+    flow.layout_blocks(ts.font_registry(), blocks, 800.0);
+
+    // Cut "Sec" (3 chars) from block 2: it now holds "ond".
+    // New document layout: blocks at 0, 6, 10.
+    let shorter = make_block_at(2, 6, "ond");
+    flow.relayout_block(ts.font_registry(), &shorter, 800.0);
+
+    assert_eq!(flow.blocks.get(&1).unwrap().position, 0);
+    assert_eq!(flow.blocks.get(&2).unwrap().position, 6);
+    assert_eq!(
+        flow.blocks.get(&3).unwrap().position,
+        10,
+        "block 3's document position must be shifted by the char delta \
+         (-3) after block 2 was relaid out with fewer chars"
+    );
+}
+
+#[test]
 fn flow_content_height_matches_blocks() {
     let ts = make_typesetter();
     let mut flow = FlowLayout::new();

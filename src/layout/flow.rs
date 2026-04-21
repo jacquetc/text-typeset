@@ -275,6 +275,7 @@ impl FlowLayout {
             .unwrap_or(0.0);
         let old_content = old_height - old_top_margin - old_bottom_margin;
         let old_end = old_y + old_content + old_bottom_margin;
+        let old_char_len = block_char_len(self.blocks.get(&block_id));
 
         let mut block = layout_block(registry, params, available_width, self.scale_factor);
         block.y = old_y;
@@ -289,6 +290,8 @@ impl FlowLayout {
         let new_content = block.height - block.top_margin - block.bottom_margin;
         let new_end = block.y + new_content + block.bottom_margin;
         let delta = new_end - old_end;
+        let new_char_len = block_char_len(Some(&block));
+        let char_delta = new_char_len as isize - old_char_len as isize;
 
         let new_y = block.y;
         let new_height = block.height;
@@ -311,6 +314,7 @@ impl FlowLayout {
         }
 
         self.shift_items_after_block(block_id, delta);
+        self.shift_block_positions_after_block(block_id, char_delta);
     }
 
     /// Relayout a block inside a table cell. Recomputes the row height
@@ -455,6 +459,54 @@ impl FlowLayout {
         }
 
         self.shift_items_after_frame(frame_id, delta);
+    }
+
+    /// Shift the document-character `position` of every block that appears
+    /// after the given target block in flow order by `char_delta` characters.
+    ///
+    /// `shift_items_after_block` only propagates the vertical pixel delta.
+    /// This method propagates the character delta so hit_test and caret_rect
+    /// keep returning correct document positions after an incremental
+    /// relayout that changed the target block's char length (e.g. a cut or
+    /// paste inside a non-last paragraph).
+    fn shift_block_positions_after_block(&mut self, block_id: usize, char_delta: isize) {
+        if char_delta == 0 {
+            return;
+        }
+        // Snapshot the order of items so we can mutate the containing
+        // HashMaps inside the loop.
+        let refs: Vec<FlowItemRef> = self
+            .flow_order
+            .iter()
+            .map(|item| match item {
+                FlowItem::Block { block_id, .. } => FlowItemRef::Block(*block_id),
+                FlowItem::Table { table_id, .. } => FlowItemRef::Table(*table_id),
+                FlowItem::Frame { frame_id, .. } => FlowItemRef::Frame(*frame_id),
+            })
+            .collect();
+        let mut found = false;
+        for r in refs {
+            match r {
+                FlowItemRef::Block(id) => {
+                    if found && let Some(b) = self.blocks.get_mut(&id) {
+                        b.position = apply_char_delta(b.position, char_delta);
+                    }
+                    if id == block_id {
+                        found = true;
+                    }
+                }
+                FlowItemRef::Table(id) => {
+                    if found && let Some(t) = self.tables.get_mut(&id) {
+                        shift_block_positions_in_table(t, char_delta);
+                    }
+                }
+                FlowItemRef::Frame(id) => {
+                    if found && let Some(f) = self.frames.get_mut(&id) {
+                        shift_block_positions_in_frame(f, char_delta);
+                    }
+                }
+            }
+        }
     }
 
     /// Shift all flow items after the given block by `delta` pixels.
@@ -627,6 +679,48 @@ impl FlowLayout {
             }
         }
         None
+    }
+}
+
+enum FlowItemRef {
+    Block(usize),
+    Table(usize),
+    Frame(usize),
+}
+
+fn block_char_len(block: Option<&BlockLayout>) -> usize {
+    block
+        .and_then(|b| b.lines.last().map(|l| l.char_range.end))
+        .unwrap_or(0)
+}
+
+fn apply_char_delta(position: usize, delta: isize) -> usize {
+    if delta >= 0 {
+        position + delta as usize
+    } else {
+        position.saturating_sub((-delta) as usize)
+    }
+}
+
+fn shift_block_positions_in_slice(blocks: &mut [BlockLayout], delta: isize) {
+    for block in blocks {
+        block.position = apply_char_delta(block.position, delta);
+    }
+}
+
+fn shift_block_positions_in_table(table: &mut TableLayout, delta: isize) {
+    for cell in &mut table.cell_layouts {
+        shift_block_positions_in_slice(&mut cell.blocks, delta);
+    }
+}
+
+fn shift_block_positions_in_frame(frame: &mut FrameLayout, delta: isize) {
+    shift_block_positions_in_slice(&mut frame.blocks, delta);
+    for table in &mut frame.tables {
+        shift_block_positions_in_table(table, delta);
+    }
+    for nested in &mut frame.frames {
+        shift_block_positions_in_frame(nested, delta);
     }
 }
 

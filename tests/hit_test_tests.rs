@@ -1066,6 +1066,46 @@ fn caret_rect_inside_frame_advances_with_position() {
     );
 }
 
+// ── Relayout after cut from a non-last paragraph ───────────────
+
+#[test]
+fn hit_test_on_last_paragraph_after_cut_from_middle() {
+    // Mirrors the user-reported UI bug: after cutting chars from a non-last
+    // paragraph, clicking at the very end of the last paragraph used to land
+    // N chars short of the actual last character, because relayout_block
+    // shifted Y positions but left BlockLayout.position stale.
+    let mut ts = make_typesetter();
+    ts.layout_blocks(vec![
+        make_block_at(1, 0, "First"),
+        make_block_at(2, 6, "Second"),
+        make_block_at(3, 13, "Third"),
+    ]);
+    ts.render();
+
+    // Capture where the very last caret position renders BEFORE the cut
+    // (position 18 = end of "Third" in the initial 16-char, 3-block doc).
+    let last_caret_before = ts.caret_rect(18);
+
+    // Cut "Sec" from block 2: text goes from "Second" (6 chars) to "ond" (3).
+    // New document layout: blocks at 0, 6, 10; max cursor position = 15.
+    ts.relayout_block(&make_block_at(2, 6, "ond"));
+    ts.render();
+
+    // Click just inside the right edge of the last paragraph. In the pre-fix
+    // world, the layout thought block 3 was at position 13, so this click
+    // returned position 18 — a position that no longer exists in the doc.
+    // With the fix, block 3's position is 10, so this click returns 15 (the
+    // real end of the shortened doc).
+    let hit = ts
+        .hit_test(200.0, last_caret_before[1] + last_caret_before[3] / 2.0)
+        .expect("click inside last paragraph should hit");
+    assert_eq!(
+        hit.position, 15,
+        "clicking at the visual end of the last paragraph after cut must map to \
+         the new max cursor position (15), not the stale pre-cut value"
+    );
+}
+
 // ── Relayout frame block (simulating typing) ───────────────────
 
 #[test]
