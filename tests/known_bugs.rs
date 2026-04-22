@@ -43,7 +43,6 @@ use helpers::{make_block, make_typesetter};
 // actually needs.
 
 #[test]
-#[ignore = "FIXME: 'fi' ligature drops character_geometry entries (a11y regression)"]
 fn ligature_character_geometry_returns_one_entry_per_char() {
     let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "fi")]);
@@ -59,7 +58,6 @@ fn ligature_character_geometry_returns_one_entry_per_char() {
 }
 
 #[test]
-#[ignore = "FIXME: 'ffi' ligature drops character_geometry entries (a11y regression)"]
 fn ffi_ligature_character_geometry_returns_three_entries() {
     let mut ts = make_typesetter();
     ts.layout_blocks(vec![make_block(1, "ffi")]);

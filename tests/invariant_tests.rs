@@ -92,26 +92,23 @@ proptest! {
     }
 }
 
-// ── Invariant 4: character_geometry count is bounded by range ───────
-// `character_geometry(block, 0, n)` should return up to n entries
-// (one per char). It may return fewer when the shaper substitutes a
-// ligature (e.g. `"fi"` → one glyph spanning two chars). A future
-// fix should synthesise per-char entries for a11y layers — for now
-// we assert the weaker bound so the invariant isn't a ligature
-// regression. Proptest found this with `text = "fi"` on the first
-// run; the counter-example is preserved in the regressions file.
+// ── Invariant 4: character_geometry count matches range ─────────────
+// `character_geometry(block, 0, n)` returns exactly n entries even
+// when the shaper produces ligatures (e.g. `"fi"` → one glyph,
+// two characters). AccessKit's `character_positions` /
+// `character_widths` need one entry per character to track the
+// caret at character granularity.
 
 proptest! {
     #[test]
-    fn character_geometry_length_is_bounded_by_char_range(text in arb_text()) {
+    fn character_geometry_length_matches_char_range(text in arb_text()) {
         let mut ts = make_typesetter();
         ts.layout_blocks(vec![make_block(1, &text)]);
         let n = text.chars().count();
         let geom = ts.character_geometry(1, 0, n);
-        prop_assert!(
-            geom.len() <= n,
-            "character_geometry returned {} entries for a {}-char range",
-            geom.len(), n
+        prop_assert_eq!(
+            geom.len(), n,
+            "character_geometry must return exactly one entry per character"
         );
     }
 }

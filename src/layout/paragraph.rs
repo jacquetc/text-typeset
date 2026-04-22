@@ -356,13 +356,14 @@ fn build_line(
         if end < flat.len() {
             flat[end].cluster as usize
         } else {
-            let byte_offset = flat[end - 1].cluster as usize;
-            let char_len = text
-                .get(byte_offset..)
-                .and_then(|s| s.chars().next())
-                .map(|c| c.len_utf8())
-                .unwrap_or(1);
-            byte_offset + char_len
+            // Last glyph reaches the end of the input text. Using
+            // `flat[end-1].cluster + 1 char` is wrong when the last
+            // glyph is a ligature covering multiple source chars
+            // (e.g. "fi" shaped as a single glyph whose cluster=0
+            // but represents "fi", so the end is at text.len()=2,
+            // not cluster+1=1). Always snap to the full text length
+            // for the end-of-input case.
+            text.len()
         }
     } else {
         byte_start
