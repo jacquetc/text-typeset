@@ -1,0 +1,11 @@
+---
+source: tests/snapshot_tests.rs
+expression: lines
+---
+[
+    "width=40, line_count=21",
+    "width=80, line_count=11",
+    "width=160, line_count=5",
+    "width=320, line_count=3",
+    "width=640, line_count=2",
+]

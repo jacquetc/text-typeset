@@ -29,6 +29,8 @@ text-document = { path = "../text-document/crates/public_api", version = "1.4.2"
 
 [dev-dependencies]
 text-document = { path = "../text-document/crates/public_api", version = "1.4.2" }
+insta = { version = "1.40", features = ["yaml"] }
+proptest = "1"
 
 [profile.release]
 lto = "fat"

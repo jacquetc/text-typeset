@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_tests.rs
+expression: "format!(\"glyph_count={} (expected >=4)\", n_glyphs)"
+---
+glyph_count=4 (expected >=4)

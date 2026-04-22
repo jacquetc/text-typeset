@@ -1,0 +1,10 @@
+---
+source: tests/snapshot_tests.rs
+expression: out
+---
+[
+    "Left: first_glyph=true",
+    "Right: first_glyph=true",
+    "Center: first_glyph=true",
+    "Justify: first_glyph=true",
+]

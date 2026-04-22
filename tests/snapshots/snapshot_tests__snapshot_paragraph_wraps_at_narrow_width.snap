@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_tests.rs
+expression: summary
+---
+line_count=6, height_gt_zero=true, width_le_max=true

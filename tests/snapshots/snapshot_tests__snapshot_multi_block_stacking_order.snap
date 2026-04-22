@@ -1,0 +1,9 @@
+---
+source: tests/snapshot_tests.rs
+expression: heights
+---
+[
+    "block 1: y>=0=true, height>0=true",
+    "block 2: y>=0=true, height>0=true",
+    "block 3: y>=0=true, height>0=true",
+]

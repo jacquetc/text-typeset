@@ -1,0 +1,10 @@
+---
+source: tests/snapshot_tests.rs
+expression: summary
+---
+[
+    "(5, 8) -> Text",
+    "(40, 8) -> Text",
+    "(400, 8) -> PastLineEnd",
+    "(40, 800) -> BelowContent",
+]

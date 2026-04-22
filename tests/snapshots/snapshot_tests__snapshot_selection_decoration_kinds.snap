@@ -1,0 +1,9 @@
+---
+source: tests/snapshot_tests.rs
+expression: kinds
+---
+[
+    "Selection",
+    "Selection",
+    "Cursor",
+]

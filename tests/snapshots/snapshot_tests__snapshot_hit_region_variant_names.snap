@@ -1,0 +1,14 @@
+---
+source: tests/snapshot_tests.rs
+expression: names
+---
+[
+    "Text",
+    "LeftMargin",
+    "Indent",
+    "TableBorder",
+    "BelowContent",
+    "PastLineEnd",
+    "Image",
+    "Link",
+]

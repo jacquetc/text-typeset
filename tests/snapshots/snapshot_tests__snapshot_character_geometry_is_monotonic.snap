@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_tests.rs
+expression: "format!(\"count={}, monotonic={}, non_negative_widths={}\", geom.len(),\npositions_non_decreasing, all_widths_non_negative)"
+---
+count=10, monotonic=true, non_negative_widths=true

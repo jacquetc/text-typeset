@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_tests.rs
+expression: summary
+---
+uncapped_lines=15, capped_lines=2 (cap=2)
