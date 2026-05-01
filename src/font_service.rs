@@ -44,7 +44,9 @@
 use crate::atlas::allocator::GlyphAtlas;
 use crate::atlas::cache::GlyphCache;
 use crate::font::registry::FontRegistry;
-use crate::types::FontFaceId;
+use crate::font::resolve::resolve_font;
+use crate::shaping::shaper::font_metrics_px;
+use crate::types::{FontFaceId, TextFormat};
 
 /// Outcome of a call to [`TextFontService::atlas_snapshot`].
 ///
@@ -191,6 +193,55 @@ impl TextFontService {
     /// want to inspect or extend it beyond the helpers exposed here.
     pub fn font_registry(&self) -> &FontRegistry {
         &self.font_registry
+    }
+
+    // ── Font metrics ────────────────────────────────────────────
+
+    /// Line height (in logical pixels) for the registry's default
+    /// font + size, computed as `ascent + descent + leading`.
+    ///
+    /// Useful for callers that need to size a widget against the
+    /// intrinsic line height *before* any content has been laid out
+    /// (an empty editor that wants to report a `min_lines`-tall
+    /// intrinsic size, for example). Returns `0.0` when no default
+    /// font is registered or the face cannot be opened.
+    ///
+    /// Does not apply any per-block `line_height_multiplier` —
+    /// multipliers live on `BlockFormat`, not on the font, and have
+    /// no meaning when there's no block to multiply against. Use
+    /// [`measure_line_height`](Self::measure_line_height) when you
+    /// already have a [`TextFormat`].
+    pub fn default_line_height(&self) -> f32 {
+        self.measure_line_height(&TextFormat::default())
+    }
+
+    /// Line height (in logical pixels) for an explicit
+    /// [`TextFormat`], computed as `ascent + descent + leading` of
+    /// the resolved font at the resolved size. Fields left as `None`
+    /// fall back to the registry's defaults — same resolution path
+    /// as live inline runs (see `font::resolve::resolve_font`).
+    ///
+    /// Returns `0.0` when the format cannot be resolved (no default
+    /// font registered, requested family missing and no fallback,
+    /// face fails to open).
+    pub fn measure_line_height(&self, format: &TextFormat) -> f32 {
+        let font_point_size = format.font_size.map(|s| s as u32);
+        let resolved = match resolve_font(
+            &self.font_registry,
+            format.font_family.as_deref(),
+            format.font_weight,
+            format.font_bold,
+            format.font_italic,
+            font_point_size,
+            self.scale_factor,
+        ) {
+            Some(r) => r,
+            None => return 0.0,
+        };
+        match font_metrics_px(&self.font_registry, &resolved) {
+            Some(m) => m.ascent + m.descent + m.leading,
+            None => 0.0,
+        }
     }
 
     // ── HiDPI scale factor ──────────────────────────────────────

@@ -274,3 +274,65 @@ fn resolve_font_with_nonexistent_family_falls_back() {
         "should respect requested size"
     );
 }
+
+// ── Line-height queries ─────────────────────────────────────────
+
+#[test]
+fn default_line_height_zero_when_no_font_registered() {
+    let ts = Typesetter::new();
+    assert_eq!(ts.service.default_line_height(), 0.0);
+}
+
+#[test]
+fn default_line_height_matches_manual_metrics() {
+    use text_typeset::font::resolve::resolve_font;
+    use text_typeset::shaping::shaper::font_metrics_px;
+
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 14.0);
+
+    let resolved =
+        resolve_font(ts.font_registry(), None, None, None, None, None, 1.0).unwrap();
+    let metrics = font_metrics_px(ts.font_registry(), &resolved).unwrap();
+    let expected = metrics.ascent + metrics.descent + metrics.leading;
+
+    let actual = ts.service.default_line_height();
+    assert!(
+        (actual - expected).abs() < 0.001,
+        "expected {}, got {}",
+        expected,
+        actual
+    );
+    assert!(actual > 0.0);
+}
+
+#[test]
+fn measure_line_height_scales_with_font_size() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 16.0);
+
+    let small = ts.service.measure_line_height(&text_typeset::TextFormat {
+        font_size: Some(12.0),
+        ..Default::default()
+    });
+    let large = ts.service.measure_line_height(&text_typeset::TextFormat {
+        font_size: Some(48.0),
+        ..Default::default()
+    });
+
+    assert!(small > 0.0);
+    assert!(large > small * 3.5, "48px should be roughly 4× 12px line-height");
+}
+
+#[test]
+fn measure_line_height_default_format_matches_default_line_height() {
+    let mut ts = Typesetter::new();
+    let face = ts.register_font(NOTO_SANS);
+    ts.set_default_font(face, 18.0);
+
+    let via_measure = ts.service.measure_line_height(&text_typeset::TextFormat::default());
+    let via_default = ts.service.default_line_height();
+    assert!((via_measure - via_default).abs() < 0.001);
+}
